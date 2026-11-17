@@ -10,6 +10,20 @@ from app.db.models import User
 
 @pytest.mark.asyncio
 async def test_ai_orchestrator_end_to_end_query(db_session: AsyncSession):
+    import duckdb
+
+    # Populate temporary test table in DuckDB for MockProvider query
+    duck_conn = duckdb.connect(settings.DUCKDB_DATABASE_PATH)
+    duck_conn.execute("""
+        CREATE TABLE IF NOT EXISTS global_sales (
+            category VARCHAR,
+            total_revenue DOUBLE
+        );
+        DELETE FROM global_sales;
+        INSERT INTO global_sales VALUES ('Electronics', 1500.0), ('Software', 2500.0);
+    """)
+    duck_conn.close()
+
     # Get admin user
     user_res = await db_session.execute(
         select(User).where(User.email == settings.ADMIN_EMAIL)

@@ -72,6 +72,45 @@ class DuckDBConnector(BaseConnector):
             if conn is not None:
                 conn.close()
 
+    def get_inventory(self) -> List[dict[str, Any]]:
+        """Return all accessible non-system schemas with their tables and views."""
+        schemas = self.get_schemas()
+        system_schemas = {"information_schema", "pg_catalog"}
+        filtered_schemas = [s for s in schemas if s.lower() not in system_schemas]
+        if not filtered_schemas:
+            filtered_schemas = ["main"]
+
+        conn = None
+        try:
+            conn = self._get_read_connection()
+            query = """
+                SELECT table_schema, table_name, table_type
+                FROM information_schema.tables
+                WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
+                ORDER BY table_schema, table_name
+            """
+            rows = conn.execute(query).fetchall()
+            schema_map: dict[str, list[dict[str, Any]]] = {s: [] for s in filtered_schemas}
+            for r in rows:
+                sch, tbl, typ = r[0], r[1], ("view" if "VIEW" in str(r[2]).upper() else "table")
+                if sch not in schema_map:
+                    schema_map[sch] = []
+                schema_map[sch].append({
+                    "name": tbl,
+                    "type": typ,
+                    "row_count_estimate": None,
+                })
+            return [{"name": s, "tables": schema_map.get(s, [])} for s in filtered_schemas]
+        except Exception:
+            inv = []
+            for s in filtered_schemas:
+                t_names = self.get_tables(schema_name=s)
+                inv.append({"name": s, "tables": [{"name": t, "type": "table", "row_count_estimate": None} for t in t_names]})
+            return inv
+        finally:
+            if conn is not None:
+                conn.close()
+
     def get_columns(self, table_name: str, schema_name: Optional[str] = None) -> List[ColumnMetadata]:
         schema = schema_name or "main"
         conn = None

@@ -8,6 +8,7 @@ import { DatasetsPage } from "@/features/datasets/DatasetsPage";
 import { SqlLabPage } from "@/features/sqllab/SqlLabPage";
 import { DatabasesPage } from "@/features/databases/DatabasesPage";
 import { UploadsPage } from "@/features/uploads/UploadsPage";
+import { ApiConnectionsPage } from "@/features/api_connect/ApiConnectionsPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { AdminPage } from "@/features/admin/AdminPage";
 
@@ -51,6 +52,10 @@ export const router = createBrowserRouter([
       {
         path: "uploads",
         element: <UploadsPage />,
+      },
+      {
+        path: "api-connect",
+        element: <ApiConnectionsPage />,
       },
       {
         path: "settings",

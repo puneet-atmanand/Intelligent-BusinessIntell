@@ -48,12 +48,28 @@ const transformProps = (
     return { option: { title: { text: "No data available", left: "center", top: "center" } } };
   }
 
-  const categories = rows.map((r) => String(r[0] ?? ""));
-  const metricCols = columns.slice(1);
+  const dimCount = Math.max(
+    1,
+    Array.isArray(options.dimensions) && options.dimensions.length > 0
+      ? options.dimensions.length
+      : 1
+  );
+  const effectiveDimCount = Math.min(dimCount, Math.max(1, columns.length - 1));
+
+  const categories = rows.map((r) =>
+    r
+      .slice(0, effectiveDimCount)
+      .map((v) => (v === null ? "null" : String(v)))
+      .join(" / ")
+  );
+  const metricCols = columns.slice(effectiveDimCount);
   const opacity = options.opacity ?? 0.5;
 
   const series = metricCols.map((col, idx) => {
-    const data = rows.map((r) => r[idx + 1] ?? 0);
+    const data = rows.map((r) => {
+      const val = r[effectiveDimCount + idx];
+      return typeof val === "number" ? val : Number(val) || 0;
+    });
     return {
       name: col,
       type: "line",
@@ -68,7 +84,12 @@ const transformProps = (
     tooltip: { trigger: "axis" },
     legend: { top: 10 },
     grid: { left: "4%", right: "4%", bottom: "8%", top: 50, containLabel: true },
-    xAxis: { type: "category", boundaryGap: false, data: categories },
+    xAxis: {
+      type: "category",
+      boundaryGap: false,
+      data: categories,
+      axisLabel: { interval: 0, rotate: categories.length > 6 ? 30 : 0 },
+    },
     yAxis: { type: "value" },
     series,
   };

@@ -8,6 +8,16 @@ from app.db.models.dashboard import Dashboard, DashboardChart, DashboardFilter
 from app.db.models.sqllab import SavedQuery, QueryHistory
 from app.db.models.ai import AIConversation, AIMessage, AIToolCall, AIFeedback
 from app.db.models.audit import AuditLog, ApiToken, ReportSchedule
+from app.db.models.api_connect import (
+    ApiConnection,
+    ApiCredential,
+    ApiDatasetCollection,
+    ApiEndpoint,
+    ApiDatasetTable,
+    ApiSyncJob,
+    ApiSyncRun,
+    ApiSnapshot,
+)
 
 __all__ = [
     "Base",
@@ -36,5 +46,13 @@ __all__ = [
     "AuditLog",
     "ApiToken",
     "ReportSchedule",
+    "ApiConnection",
+    "ApiCredential",
+    "ApiDatasetCollection",
+    "ApiEndpoint",
+    "ApiDatasetTable",
+    "ApiSyncJob",
+    "ApiSyncRun",
+    "ApiSnapshot",
 ]
 

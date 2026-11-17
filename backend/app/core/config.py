@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # Security
     SECRET_KEY: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
     # 32-byte Fernet key base64 urlsafe encoded
-    ENCRYPTION_KEY: str = "dGhpcy1pcy1hLTMyLWJ5dGUtZmVybmV0LWtleS0xMjM0NTY="
+    ENCRYPTION_KEY: str = "dGhpcy1pcy1hLTMyLWJ5dGUtZmVybmV0LWtleS0xMjM="
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     COOKIE_SECURE: bool = False  # Set to True in production (HTTPS)
@@ -88,6 +88,11 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE_MB: int = 200
     STATEMENT_TIMEOUT_SECONDS: int = 30
     DEFAULT_ROW_LIMIT: int = 10000
+    AI_MAX_ROWS: int = 2000
+    BULK_DATASET_MAX_TABLES: int = 100
+    FULL_DASHBOARD_MAX_CHARTS_PER_TABLE: int = 14
+    FULL_DASHBOARD_MAX_TOTAL_CHARTS: int = 200
+    AUTO_RELATIONSHIP_MAX: int = 10
 
     # AI Configuration
     AI_ENABLED: bool = True

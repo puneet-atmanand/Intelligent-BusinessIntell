@@ -33,7 +33,7 @@ export const ChartsPage: React.FC = () => {
     queryFn: api.getCharts,
   });
 
-  const { data: datasets = [] } = useQuery({
+  const { data: datasets = [], isLoading: isLoadingDatasets, refetch: refetchDatasets } = useQuery({
     queryKey: ["datasets"],
     queryFn: api.getDatasets,
   });
@@ -65,9 +65,11 @@ export const ChartsPage: React.FC = () => {
   const [selectedDimensions, setSelectedDimensions] = useState<string[]>([]);
 
   // Y-Axis (Metric / Measure & Aggregation)
+  const [metricsList, setMetricsList] = useState<Array<{ id: string; column: string; agg: string }>>([
+    { id: "m-0", column: "count", agg: "SUM" },
+  ]);
   const [primaryMetricCol, setPrimaryMetricCol] = useState<string>("count");
   const [primaryMetricAgg, setPrimaryMetricAgg] = useState<string>("SUM");
-  const [additionalMetrics, setAdditionalMetrics] = useState<any[]>([]);
 
   // Temporal Axis
   const [timeColumn, setTimeColumn] = useState<string>("");
@@ -116,22 +118,14 @@ export const ChartsPage: React.FC = () => {
 
   // Sync initial dataset ID
   useEffect(() => {
+    const datasetParam = searchParams.get("dataset") || searchParams.get("dataset_id");
+    if (datasetParam) {
+      return; // Do not auto-select first dataset when a specific dataset is requested via URL
+    }
     if (datasetList.length > 0 && !selectedDatasetId) {
       setSelectedDatasetId(datasetList[0].id);
     }
-  }, [datasetList, selectedDatasetId]);
-
-  // Handle URL param ?dataset=...
-  useEffect(() => {
-    const datasetParam = searchParams.get("dataset");
-    if (datasetParam && datasetList.length > 0) {
-      const match = datasetList.find((d) => d.id === datasetParam);
-      if (match) {
-        handleDatasetChange(match.id);
-        setMode("explore");
-      }
-    }
-  }, [searchParams, datasetList]);
+  }, [datasetList, selectedDatasetId, searchParams]);
 
   // Helper to compute initial sensible defaults for a dataset
   const initializeDatasetSelections = useCallback(
@@ -175,17 +169,20 @@ export const ChartsPage: React.FC = () => {
         const firstNum = numCols[0];
         const numName = firstNum.column_name || firstNum.name;
         setPrimaryMetricCol(numName);
-        setPrimaryMetricAgg("AVG");
+        setPrimaryMetricAgg("SUM");
+        setMetricsList([{ id: "m-0", column: numName, agg: "SUM" }]);
       } else if (ds.metrics && ds.metrics.length > 0) {
         const firstM = ds.metrics[0];
-        setPrimaryMetricCol(firstM.metric_name || (firstM as any).name);
+        const mName = firstM.metric_name || (firstM as any).name;
+        setPrimaryMetricCol(mName);
         setPrimaryMetricAgg("SUM");
+        setMetricsList([{ id: "m-0", column: mName, agg: "SUM" }]);
       } else {
         setPrimaryMetricCol("count");
         setPrimaryMetricAgg("COUNT");
+        setMetricsList([{ id: "m-0", column: "count", agg: "COUNT" }]);
       }
 
-      setAdditionalMetrics([]);
       setFilters([]);
       setChartData(null);
       setQueryError(null);
@@ -207,52 +204,67 @@ export const ChartsPage: React.FC = () => {
   // Build active metrics payload
   const activeMetrics = useMemo(() => {
     const list: any[] = [];
-    if (primaryMetricCol === "count" || !primaryMetricCol) {
-      list.push({ name: "count", label: "Count of Rows", expression: "COUNT(*)" });
-    } else {
-      // Check if primaryMetricCol matches a predefined dataset metric
-      const predefined = currentPredefinedMetrics.find(
-        (m) => (m.metric_name || (m as any).name) === primaryMetricCol
-      );
-      if (predefined) {
+    for (const m of metricsList) {
+      if (!m.column) continue;
+      if (m.column === "count") {
         list.push({
-          name: predefined.metric_name || (predefined as any).name,
-          label: predefined.verbose_name || predefined.metric_name || (predefined as any).name,
-          expression: predefined.sql_expression,
+          name: "count",
+          label: "Count of Rows",
+          expression: "COUNT(*)",
+          column: "count",
+          agg: "COUNT",
         });
       } else {
-        const agg = primaryMetricAgg.toUpperCase();
-        const expr =
-          agg === "COUNT_DISTINCT"
-            ? `COUNT(DISTINCT "${primaryMetricCol}")`
-            : `${agg}("${primaryMetricCol}")`;
-        const mName = `${agg.toLowerCase()}_${primaryMetricCol}`;
-        const label = `${agg}(${primaryMetricCol})`;
-        list.push({ name: mName, label, expression: expr, column: primaryMetricCol, agg });
+        const predefined = currentPredefinedMetrics.find(
+          (pm: any) => (pm.metric_name || pm.name) === m.column
+        );
+        if (predefined) {
+          list.push({
+            name: predefined.metric_name || predefined.name,
+            label: predefined.verbose_name || predefined.metric_name || predefined.name,
+            expression: predefined.sql_expression,
+            column: m.column,
+            agg: "EXPR",
+          });
+        } else {
+          const agg = (m.agg || "SUM").toUpperCase();
+          const expr =
+            agg === "COUNT_DISTINCT"
+              ? `COUNT(DISTINCT "${m.column}")`
+              : `${agg}("${m.column}")`;
+          const mName = `${agg.toLowerCase()}_${m.column}`;
+          const label = `${agg}(${m.column})`;
+          list.push({
+            name: mName,
+            label,
+            expression: expr,
+            column: m.column,
+            agg,
+          });
+        }
       }
     }
-
-    // Append any additional metrics
-    for (const extra of additionalMetrics) {
-      if (!list.some((m) => m.name === extra.name || m.expression === extra.expression)) {
-        list.push(extra);
-      }
+    if (list.length === 0) {
+      list.push({
+        name: "count",
+        label: "Count of Rows",
+        expression: "COUNT(*)",
+        column: "count",
+        agg: "COUNT",
+      });
     }
     return list;
-  }, [primaryMetricCol, primaryMetricAgg, additionalMetrics, currentPredefinedMetrics]);
+  }, [metricsList, currentPredefinedMetrics]);
 
   // Execute chart query mutation
   const runQueryMutation = useMutation({
     mutationFn: async () => {
       if (!selectedDatasetId) throw new Error("Please select a dataset.");
-      const plugin = chartRegistry.get(selectedVizType);
-      const isMultiDim = plugin?.controlPanel.dimensions.multi;
 
-      let dims: string[] = isMultiDim
-        ? selectedDimensions
-        : selectedDimension
-        ? [selectedDimension]
-        : [];
+      let dims: string[] = selectedDimensions.filter(Boolean);
+      if (dims.length === 0 && selectedDimension) {
+        dims = [selectedDimension];
+      }
 
       // For big_number KPI, dimensions are not required
       if (selectedVizType === "big_number") {
@@ -313,11 +325,8 @@ export const ChartsPage: React.FC = () => {
     const currentKey = JSON.stringify({
       ds: selectedDatasetId,
       viz: selectedVizType,
-      dim: selectedDimension,
       dims: selectedDimensions,
-      mCol: primaryMetricCol,
-      mAgg: primaryMetricAgg,
-      addM: additionalMetrics,
+      mList: metricsList,
       tc: timeColumn,
       tg: timeGrain,
       f: filters,
@@ -335,9 +344,7 @@ export const ChartsPage: React.FC = () => {
     selectedVizType,
     selectedDimension,
     selectedDimensions,
-    primaryMetricCol,
-    primaryMetricAgg,
-    additionalMetrics,
+    metricsList,
     timeColumn,
     timeGrain,
     filters,
@@ -354,12 +361,13 @@ export const ChartsPage: React.FC = () => {
         viz_type: selectedVizType,
         dashboard_id: targetDashboardId && targetDashboardId !== "auto" && targetDashboardId !== "none" ? targetDashboardId : undefined,
         params: {
-          dimension: selectedDimension,
-          dimensions: selectedDimensions,
-          primary_metric_col: primaryMetricCol,
-          primary_metric_agg: primaryMetricAgg,
+          dimension: selectedDimensions[0] || selectedDimension,
+          dimensions: selectedDimensions.filter(Boolean),
+          primary_metric_col: metricsList[0]?.column || primaryMetricCol,
+          primary_metric_agg: metricsList[0]?.agg || primaryMetricAgg,
           metrics: activeMetrics,
-          additional_metrics: additionalMetrics,
+          metrics_config: metricsList,
+          additional_metrics: metricsList.slice(1),
           time_column: timeColumn,
           time_grain: timeGrain,
           options: chartOptions,
@@ -400,22 +408,35 @@ export const ChartsPage: React.FC = () => {
       setSelectedVizType(chartToEdit.viz_type);
       const p = chartToEdit.params || {};
 
-      setSelectedDimension(p.dimension || "");
-      setSelectedDimensions(p.dimensions || (p.dimension ? [p.dimension] : []));
+      const dims = p.dimensions || (p.dimension ? [p.dimension] : []);
+      setSelectedDimension(dims[0] || "");
+      setSelectedDimensions(dims);
 
-      if (p.primary_metric_col) {
+      if (p.metrics_config && Array.isArray(p.metrics_config) && p.metrics_config.length > 0) {
+        setMetricsList(p.metrics_config);
+        setPrimaryMetricCol(p.metrics_config[0].column);
+        setPrimaryMetricAgg(p.metrics_config[0].agg);
+      } else if (p.metrics && p.metrics.length > 0) {
+        const mappedList = p.metrics.map((m: any, idx: number) => ({
+          id: `m-${idx}`,
+          column: m.column || m.name || "count",
+          agg: m.agg || "SUM",
+        }));
+        setMetricsList(mappedList);
+        setPrimaryMetricCol(mappedList[0].column);
+        setPrimaryMetricAgg(mappedList[0].agg);
+      } else if (p.primary_metric_col) {
         setPrimaryMetricCol(p.primary_metric_col);
         setPrimaryMetricAgg(p.primary_metric_agg || "SUM");
-      } else if (p.metrics && p.metrics.length > 0) {
-        const firstM = p.metrics[0];
-        setPrimaryMetricCol(firstM.column || firstM.name || "count");
-        setPrimaryMetricAgg(firstM.agg || "SUM");
+        setMetricsList([
+          { id: "m-0", column: p.primary_metric_col, agg: p.primary_metric_agg || "SUM" },
+        ]);
       } else {
         setPrimaryMetricCol("count");
         setPrimaryMetricAgg("SUM");
+        setMetricsList([{ id: "m-0", column: "count", agg: "SUM" }]);
       }
 
-      setAdditionalMetrics(p.additional_metrics || []);
       setTimeColumn(p.time_column || "");
       setTimeGrain(p.time_grain || "month");
       setChartOptions(p.options || {});
@@ -434,6 +455,73 @@ export const ChartsPage: React.FC = () => {
     setMode("explore");
   };
 
+  // Handle URL params ?chart_id=... or ?chart=... or ?dataset=...
+  const handledUrlParamRef = useRef<string>("");
+
+  useEffect(() => {
+    const chartIdParam = searchParams.get("chart_id") || searchParams.get("chart");
+    const datasetParam = searchParams.get("dataset") || searchParams.get("dataset_id");
+
+    const paramSignature = `${chartIdParam || ""}:${datasetParam || ""}`;
+    if (!paramSignature || paramSignature === ":") return;
+    if (handledUrlParamRef.current === paramSignature) return;
+
+    if (chartIdParam && chartList.length > 0) {
+      const matchChart = chartList.find((c) => c.id === chartIdParam);
+      if (matchChart) {
+        handledUrlParamRef.current = paramSignature;
+        handleOpenExplore(matchChart);
+        return;
+      }
+    }
+
+    if (datasetParam) {
+      const match = datasetList.find((d) => d.id === datasetParam);
+      if (match) {
+        handledUrlParamRef.current = paramSignature;
+        const datasetCharts = chartList.filter((c) => c.dataset_id === match.id);
+        const barChart = datasetCharts.find((c) => c.viz_type === "bar") || datasetCharts[0];
+        if (barChart) {
+          handleOpenExplore(barChart);
+        } else {
+          handleDatasetChange(match.id);
+          setMode("explore");
+        }
+      } else if (!isLoadingDatasets) {
+        // Newly imported dataset might not yet be in datasetList cache
+        api
+          .getDataset(datasetParam)
+          .then((ds) => {
+            if (ds && ds.id) {
+              handledUrlParamRef.current = paramSignature;
+              queryClient.setQueryData(["datasets"], (old: any) => {
+                const oldList = Array.isArray(old) ? old : (old?.data || []);
+                if (oldList.some((d: any) => d.id === ds.id)) return old;
+                return [ds, ...oldList];
+              });
+              setSelectedDatasetId(ds.id);
+              initializeDatasetSelections(ds);
+              setMode("explore");
+              queryClient.invalidateQueries({ queryKey: ["charts"] });
+            }
+          })
+          .catch(() => {
+            refetchDatasets();
+            refetchCharts();
+          });
+      }
+    }
+  }, [
+    searchParams,
+    chartList,
+    datasetList,
+    isLoadingDatasets,
+    refetchDatasets,
+    refetchCharts,
+    queryClient,
+    initializeDatasetSelections,
+  ]);
+
   const handleAddFilter = () => {
     if (!newFilterCol) return;
     setFilters([...filters, { col: newFilterCol, op: newFilterOp, val: newFilterVal }]);
@@ -447,7 +535,14 @@ export const ChartsPage: React.FC = () => {
 
   // Render chart using Plugin Registry
   const plugin: ChartPlugin | undefined = chartRegistry.get(selectedVizType);
-  const chartProps = plugin && chartData ? plugin.transformProps(chartData, chartOptions) : null;
+  const chartProps =
+    plugin && chartData
+      ? plugin.transformProps(chartData, {
+          ...chartOptions,
+          dimensions: selectedDimensions.filter(Boolean),
+          metrics: activeMetrics,
+        })
+      : null;
 
   return (
     <div className="space-y-6">
@@ -717,110 +812,29 @@ export const ChartsPage: React.FC = () => {
                   <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
                     X-Axis (Category / Dimension)
                   </label>
-                  <span className="text-[10px] text-slate-400">
-                    {plugin?.controlPanel.dimensions.multi ? "Multi-select" : "Single"}
+                  <span className="text-[10px] text-blue-600 font-medium">
+                    {selectedDimensions.length} selected
                   </span>
                 </div>
 
-                {plugin?.controlPanel.dimensions.multi ? (
-                  <div className="space-y-1.5 max-h-36 overflow-y-auto border border-slate-200 p-2 rounded bg-slate-50/50">
-                    {currentColumns.map((c) => {
-                      const colName = c.column_name || c.name;
-                      return (
-                        <label
-                          key={colName}
-                          className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer hover:text-blue-600"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedDimensions.includes(colName)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedDimensions([...selectedDimensions, colName]);
-                              } else {
-                                setSelectedDimensions(
-                                  selectedDimensions.filter((dim) => dim !== colName)
-                                );
-                              }
-                            }}
-                            className="rounded text-blue-600 focus:ring-blue-500"
-                          />
-                          <span className="font-mono text-[11px]">{colName}</span>
-                          <span className="text-[10px] text-slate-400 ml-auto">
-                            {c.data_type}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <select
-                    value={selectedDimension}
-                    onChange={(e) => {
-                      setSelectedDimension(e.target.value);
-                      setSelectedDimensions(e.target.value ? [e.target.value] : []);
-                    }}
-                    className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded bg-white font-medium focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">-- Choose X-Axis Column --</option>
-                    {currentColumns.map((c) => {
-                      const colName = c.column_name || c.name;
-                      return (
-                        <option key={colName} value={colName}>
-                          {colName} ({c.data_type})
-                        </option>
-                      );
-                    })}
-                  </select>
-                )}
-              </div>
-
-              {/* 4. Y-Axis (Metric & Aggregation) */}
-              <div className="pt-3 border-t border-slate-100 space-y-2">
-                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-                  Y-Axis (Metric & Aggregation)
-                </label>
-
-                {/* Primary Metric Row */}
-                <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 space-y-2">
-                  <div className="flex gap-1.5 items-center">
-                    {/* Aggregation Function Selector */}
-                    <select
-                      value={primaryMetricAgg}
-                      onChange={(e) => setPrimaryMetricAgg(e.target.value)}
-                      disabled={primaryMetricCol === "count"}
-                      className="w-24 px-1.5 py-1 text-xs border border-slate-300 rounded bg-white font-mono font-semibold text-blue-800 disabled:opacity-50"
-                    >
-                      <option value="SUM">SUM</option>
-                      <option value="AVG">AVG</option>
-                      <option value="MIN">MIN</option>
-                      <option value="MAX">MAX</option>
-                      <option value="COUNT">COUNT</option>
-                      <option value="COUNT_DISTINCT">DIST</option>
-                    </select>
-
-                    {/* Column Selector */}
-                    <select
-                      value={primaryMetricCol}
-                      onChange={(e) => setPrimaryMetricCol(e.target.value)}
-                      className="flex-1 min-w-0 px-2 py-1 text-xs border border-slate-300 rounded bg-white font-medium text-slate-800"
-                    >
-                      <option value="count">Count of Rows (COUNT(*))</option>
-                      {numericColumns.length > 0 && (
-                        <optgroup label="Numeric Measures">
-                          {numericColumns.map((c) => {
-                            const colName = c.column_name || c.name;
-                            return (
-                              <option key={colName} value={colName}>
-                                {colName} ({c.data_type})
-                              </option>
-                            );
-                          })}
-                        </optgroup>
-                      )}
-                      {currentColumns
-                        .filter((c) => !isNumericColumn(c))
-                        .map((c) => {
+                <div className="space-y-1.5">
+                  {selectedDimensions.map((dim, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5">
+                      <span className="w-5 text-[11px] font-bold text-slate-400 font-mono text-center">
+                        {idx + 1}.
+                      </span>
+                      <select
+                        value={dim}
+                        onChange={(e) => {
+                          const updated = [...selectedDimensions];
+                          updated[idx] = e.target.value;
+                          setSelectedDimensions(updated);
+                          if (idx === 0) setSelectedDimension(e.target.value);
+                        }}
+                        className="flex-1 min-w-0 px-2.5 py-1.5 text-xs border border-slate-300 rounded bg-white font-medium focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">-- Choose X-Axis Column --</option>
+                        {currentColumns.map((c) => {
                           const colName = c.column_name || c.name;
                           return (
                             <option key={colName} value={colName}>
@@ -828,44 +842,172 @@ export const ChartsPage: React.FC = () => {
                             </option>
                           );
                         })}
-                    </select>
-                  </div>
-
-                  <div className="text-[11px] text-slate-500 font-mono bg-white px-2 py-1 rounded border border-slate-200 flex items-center justify-between">
-                    <span className="text-slate-400">SQL Expression:</span>
-                    <span className="font-semibold text-blue-600 truncate ml-2">
-                      {primaryMetricCol === "count"
-                        ? "COUNT(*)"
-                        : `${primaryMetricAgg}("${primaryMetricCol}")`}
-                    </span>
-                  </div>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (selectedDimensions.length > 1) {
+                            const updated = selectedDimensions.filter((_, i) => i !== idx);
+                            setSelectedDimensions(updated);
+                            if (idx === 0 && updated.length > 0) {
+                              setSelectedDimension(updated[0]);
+                            }
+                          } else {
+                            setSelectedDimensions([]);
+                            setSelectedDimension("");
+                          }
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition"
+                        title="Delete this dimension"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
 
-                {/* Additional Metrics for Multi-Series Visualizations */}
-                {additionalMetrics.length > 0 && (
-                  <div className="space-y-1 pt-1">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      Additional Series:
-                    </div>
-                    {additionalMetrics.map((sm, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center justify-between text-xs bg-blue-50 text-blue-900 px-2 py-1 rounded font-mono"
-                      >
-                        <span className="truncate">{sm.label || sm.expression}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const candidate = currentColumns.find(
+                      (c) => !selectedDimensions.includes(c.column_name || c.name)
+                    );
+                    const colToAdd = candidate
+                      ? candidate.column_name || candidate.name
+                      : currentColumns[0]?.column_name || currentColumns[0]?.name || "";
+                    if (colToAdd) {
+                      const updated = [...selectedDimensions, colToAdd];
+                      setSelectedDimensions(updated);
+                      if (!selectedDimension) setSelectedDimension(colToAdd);
+                    }
+                  }}
+                  disabled={selectedDimensions.length >= currentColumns.length}
+                  className="mt-1 flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded transition disabled:opacity-40"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add Dimension (Group By)
+                </button>
+              </div>
+
+              {/* 4. Y-Axis (Metrics & Aggregations) */}
+              <div className="pt-3 border-t border-slate-100 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                    Y-Axis (Metrics & Measures)
+                  </label>
+                  <span className="text-[10px] text-blue-600 font-medium">
+                    {metricsList.length} measure{metricsList.length !== 1 ? "s" : ""}
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  {metricsList.map((m, idx) => (
+                    <div key={m.id || idx} className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 space-y-1.5">
+                      <div className="flex gap-1.5 items-center">
+                        <select
+                          value={m.agg}
+                          onChange={(e) => {
+                            const updated = [...metricsList];
+                            updated[idx] = { ...updated[idx], agg: e.target.value };
+                            setMetricsList(updated);
+                            if (idx === 0) setPrimaryMetricAgg(e.target.value);
+                          }}
+                          disabled={m.column === "count"}
+                          className="w-24 px-1.5 py-1 text-xs border border-slate-300 rounded bg-white font-mono font-semibold text-blue-800 disabled:opacity-50"
+                        >
+                          <option value="SUM">SUM</option>
+                          <option value="AVG">AVG</option>
+                          <option value="MIN">MIN</option>
+                          <option value="MAX">MAX</option>
+                          <option value="COUNT">COUNT</option>
+                          <option value="COUNT_DISTINCT">DIST</option>
+                        </select>
+
+                        <select
+                          value={m.column}
+                          onChange={(e) => {
+                            const updated = [...metricsList];
+                            updated[idx] = { ...updated[idx], column: e.target.value };
+                            setMetricsList(updated);
+                            if (idx === 0) setPrimaryMetricCol(e.target.value);
+                          }}
+                          className="flex-1 min-w-0 px-2 py-1 text-xs border border-slate-300 rounded bg-white font-medium text-slate-800"
+                        >
+                          <option value="count">Count of Rows (COUNT(*))</option>
+                          {numericColumns.length > 0 && (
+                            <optgroup label="Numeric Measures">
+                              {numericColumns.map((c) => {
+                                const colName = c.column_name || c.name;
+                                return (
+                                  <option key={colName} value={colName}>
+                                    {colName} ({c.data_type})
+                                  </option>
+                                );
+                              })}
+                            </optgroup>
+                          )}
+                          {currentColumns
+                            .filter((c) => !isNumericColumn(c))
+                            .map((c) => {
+                              const colName = c.column_name || c.name;
+                              return (
+                                <option key={colName} value={colName}>
+                                  {colName} ({c.data_type})
+                                </option>
+                              );
+                            })}
+                        </select>
+
                         <button
                           type="button"
-                          onClick={() =>
-                            setAdditionalMetrics(additionalMetrics.filter((_, i) => i !== idx))
-                          }
-                          className="text-blue-400 hover:text-red-600 ml-1"
+                          onClick={() => {
+                            if (metricsList.length > 1) {
+                              const updated = metricsList.filter((_, i) => i !== idx);
+                              setMetricsList(updated);
+                              if (idx === 0 && updated.length > 0) {
+                                setPrimaryMetricCol(updated[0].column);
+                                setPrimaryMetricAgg(updated[0].agg);
+                              }
+                            } else {
+                              setMetricsList([{ id: "m-0", column: "count", agg: "COUNT" }]);
+                              setPrimaryMetricCol("count");
+                              setPrimaryMetricAgg("COUNT");
+                            }
+                          }}
+                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition"
+                          title="Delete this metric"
                         >
-                          ✕
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                    ))}
-                  </div>
-                )}
+
+                      <div className="text-[11px] text-slate-500 font-mono bg-white px-2 py-1 rounded border border-slate-200 flex items-center justify-between">
+                        <span className="text-slate-400">SQL Expression:</span>
+                        <span className="font-semibold text-blue-600 truncate ml-2">
+                          {m.column === "count" ? "COUNT(*)" : `${m.agg}("${m.column}")`}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const candidate = numericColumns.find(
+                      (c) => !metricsList.some((m) => m.column === (c.column_name || c.name))
+                    );
+                    const colToAdd = candidate ? candidate.column_name || candidate.name : "count";
+                    setMetricsList([
+                      ...metricsList,
+                      { id: `m-${Date.now()}-${Math.random()}`, column: colToAdd, agg: "SUM" },
+                    ]);
+                  }}
+                  className="mt-1 flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded transition"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add Metric (Measure)
+                </button>
               </div>
 
               {/* 5. Temporal Axis & Time Grain (Strictly Validated for DATE / TIMESTAMP) */}
@@ -1140,12 +1282,12 @@ export const ChartsPage: React.FC = () => {
                             {plugin?.metadata.name || selectedVizType}
                           </span>
                           .
-                          {selectedDimension && (
+                          {selectedDimensions.length > 0 && (
                             <>
                               {" "}
                               Grouping by{" "}
                               <span className="font-semibold text-blue-700 font-mono bg-blue-50 px-1.5 py-0.5 rounded">
-                                {selectedDimension}
+                                {selectedDimensions.join(", ")}
                               </span>
                               .
                             </>

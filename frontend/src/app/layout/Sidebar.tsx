@@ -6,6 +6,7 @@ import {
   Terminal,
   Server,
   UploadCloud,
+  Globe,
   Shield,
   Settings as SettingsIcon,
   ChevronLeft,
@@ -31,6 +32,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     { name: "SQL Lab", path: "/sqllab", icon: Terminal },
     { name: "Databases", path: "/databases", icon: Server },
     { name: "Uploads", path: "/uploads", icon: UploadCloud },
+    { name: "API Connect", path: "/api-connect", icon: Globe },
     { name: "Settings", path: "/settings", icon: SettingsIcon },
   ];
 

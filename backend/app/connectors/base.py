@@ -83,6 +83,11 @@ class BaseConnector(ABC):
         pass
 
     @abstractmethod
+    def get_inventory(self) -> List[Dict[str, Any]]:
+        """Return all accessible non-system schemas with their tables/views and estimated row counts."""
+        pass
+
+    @abstractmethod
     def execute_query(
         self,
         sql: str,

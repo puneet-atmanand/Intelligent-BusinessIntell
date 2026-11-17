@@ -78,6 +78,8 @@ export const UploadsPage: React.FC = () => {
       setSelectedFile(null);
       queryClient.invalidateQueries({ queryKey: ["uploads"] });
       queryClient.invalidateQueries({ queryKey: ["datasets"] });
+      queryClient.invalidateQueries({ queryKey: ["charts"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboards"] });
     },
   });
 
@@ -87,6 +89,8 @@ export const UploadsPage: React.FC = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["uploads"] });
       queryClient.invalidateQueries({ queryKey: ["datasets"] });
+      queryClient.invalidateQueries({ queryKey: ["charts"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboards"] });
     },
   });
 
@@ -156,7 +160,7 @@ export const UploadsPage: React.FC = () => {
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
               <button
-                onClick={() => navigate("/charts")}
+                onClick={() => navigate(`/charts?dataset=${importSuccess.datasetId}`)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-green-700 hover:bg-green-800 rounded-md transition"
               >
                 Build Chart

@@ -1,4 +1,6 @@
 """Pytest test configuration and fixtures."""
+import os
+import tempfile
 from typing import AsyncGenerator
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -13,6 +15,10 @@ from app.api.v1.deps import get_db_session
 
 # Set testing environment so lifespan does not attempt connection to default postgres
 settings.ENVIRONMENT = "testing"
+
+# Isolate DuckDB path and snapshots to temporary directory so test data never pollutes application DB
+_test_duckdb_dir = tempfile.mkdtemp(prefix="test_duckdb_")
+settings.DUCKDB_DATABASE_PATH = os.path.join(_test_duckdb_dir, "test.duckdb")
 
 # Use in-memory SQLite with StaticPool so all async connections share the same memory DB
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"

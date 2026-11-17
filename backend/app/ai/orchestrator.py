@@ -21,7 +21,7 @@ from app.ai.tools import (
     tool_get_table_schema,
     tool_list_datasets_and_tables,
 )
-from app.db.models import AIConversation, AIMessage, AIToolCall, Dataset, User
+from app.db.models import AIConversation, AIMessage, AIToolCall, DatabaseConnection, Dataset, User
 
 
 def recommend_chart_for_results(
@@ -156,6 +156,7 @@ class AIOrchestrator:
 
         # 3. Contextual prompt enrichment if dataset_id provided
         context_hint = ""
+        ds: Optional[Dataset] = None
         if dataset_id:
             ds_res = await session.execute(
                 select(Dataset)
@@ -164,11 +165,21 @@ class AIOrchestrator:
             )
             ds = ds_res.scalar_one_or_none()
             if ds:
+                db_conn_res = await session.execute(
+                    select(DatabaseConnection).where(
+                        DatabaseConnection.id == ds.database_id,
+                        DatabaseConnection.deleted_at.is_(None),
+                    )
+                )
+                db_conn = db_conn_res.scalar_one_or_none()
+                db_dialect = db_conn.dialect if db_conn else "SQL"
                 col_list = ", ".join([f"{c.name} ({c.data_type})" for c in (ds.columns or [])])
                 context_hint = (
                     f"\n\n### ACTIVE DATASET CONTEXT (STRICT SCOPE):\n"
                     f"- The user is specifically exploring dataset: '{ds.name}'\n"
                     f"- Target Table: '{ds.table_name}'\n"
+                    f"- Database ID: '{ds.database_id}' (Dialect: {db_dialect})\n"
+                    f"- Schema Name: '{ds.schema_name or 'public'}'\n"
                     f"- Columns: {col_list or 'Inspect with get_table_schema'}\n"
                     f"- IMPORTANT: You MUST focus your analysis, queries, and answers ONLY on table '{ds.table_name}' unless the user explicitly asks about other tables."
                 )
@@ -228,10 +239,17 @@ class AIOrchestrator:
 
                 elif tc.name == "execute_sql_query":
                     sql = tc.arguments.get("sql", "")
+                    target_db_id = tc.arguments.get("database_id")
+                    if not target_db_id:
+                        if database_id:
+                            target_db_id = str(database_id)
+                        elif ds:
+                            target_db_id = str(ds.database_id)
                     tool_output = await tool_execute_sql_query(
                         session=session,
                         sql=sql,
-                        database_id=str(database_id) if database_id else None,
+                        database_id=target_db_id,
+                        max_rows=tc.arguments.get("max_rows"),
                     )
                     success = tool_output.get("success", False)
 

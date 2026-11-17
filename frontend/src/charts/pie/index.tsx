@@ -46,9 +46,20 @@ const transformProps = (
     return { option: { title: { text: "No data available", left: "center", top: "center" } } };
   }
 
+  const dimCount = Math.max(
+    1,
+    Array.isArray(options.dimensions) && options.dimensions.length > 0
+      ? options.dimensions.length
+      : 1
+  );
+  const effectiveDimCount = Math.min(dimCount, Math.max(1, columns.length - 1));
+
   const pieData = rows.map((r) => ({
-    name: String(r[0] ?? "Unknown"),
-    value: Number(r[1] ?? 0),
+    name: r
+      .slice(0, effectiveDimCount)
+      .map((v) => (v === null ? "null" : String(v)))
+      .join(" / "),
+    value: Number(r[effectiveDimCount] ?? 0),
   }));
 
   const isDonut = options.donut !== false;
@@ -59,7 +70,7 @@ const transformProps = (
     legend: options.showLegend !== false ? { orient: "vertical", left: "left", top: "center" } : undefined,
     series: [
       {
-        name: columns[1] || "Metric",
+        name: columns[effectiveDimCount] || "Metric",
         type: "pie",
         radius,
         roseType: options.roseType ? "radius" : undefined,

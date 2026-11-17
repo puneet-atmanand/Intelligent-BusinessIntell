@@ -59,7 +59,7 @@ AI_TOOLS_SPEC = [
         "type": "function",
         "function": {
             "name": "execute_sql_query",
-            "description": "Executes a safe, read-only SELECT query against the user's data and returns the resulting rows, column headers, and execution metrics.",
+            "description": "Executes a safe, read-only SELECT query against the user's data and returns the resulting rows, column headers, and execution metrics. IMPORTANT: For aggregate questions (totals, averages, counts per category), ALWAYS use SQL aggregations (COUNT, SUM, AVG, GROUP BY) rather than pulling raw unaggregated rows.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -101,6 +101,8 @@ async def tool_list_datasets_and_tables(
             "dataset_id": str(d.id),
             "name": d.name,
             "table_name": d.table_name,
+            "database_id": str(d.database_id),
+            "schema_name": d.schema_name,
             "description": d.description,
             "is_virtual": d.is_virtual,
             "columns": [c.name for c in d.columns if not c.is_hidden_from_ai],
@@ -147,6 +149,8 @@ async def tool_get_table_schema(
             "found": True,
             "source_type": "semantic_dataset",
             "dataset_id": str(dataset.id),
+            "database_id": str(dataset.database_id),
+            "schema_name": dataset.schema_name,
             "table_name": dataset.table_name,
             "name": dataset.name,
             "description": dataset.description,
@@ -195,15 +199,79 @@ async def tool_execute_sql_query(
     session: AsyncSession,
     sql: str,
     database_id: Optional[str] = None,
-    max_rows: int = 500,
+    max_rows: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Execute execute_sql_query tool with full AST security guardrails."""
-    # 1. Enforce AST security constraints
+    effective_max_rows = max_rows or getattr(settings, "AI_MAX_ROWS", 2000)
+
+    # 1. Resolve target Database Connection
+    db_conn: Optional[DatabaseConnection] = None
+    if database_id:
+        try:
+            db_uid = uuid.UUID(str(database_id))
+            db_res = await session.execute(
+                select(DatabaseConnection).where(
+                    DatabaseConnection.id == db_uid,
+                    DatabaseConnection.deleted_at.is_(None),
+                )
+            )
+            db_conn = db_res.scalar_one_or_none()
+            if not db_conn:
+                # Check if database_id passed was actually a Dataset ID
+                ds_res = await session.execute(
+                    select(Dataset).where(
+                        Dataset.id == db_uid,
+                        Dataset.deleted_at.is_(None),
+                    )
+                )
+                ds_match = ds_res.scalar_one_or_none()
+                if ds_match:
+                    db_res2 = await session.execute(
+                        select(DatabaseConnection).where(
+                            DatabaseConnection.id == ds_match.database_id,
+                            DatabaseConnection.deleted_at.is_(None),
+                        )
+                    )
+                    db_conn = db_res2.scalar_one_or_none()
+        except Exception:
+            pass
+
+    # If still not resolved, check if table in SQL belongs to a registered dataset
+    if not db_conn:
+        try:
+            all_ds_res = await session.execute(
+                select(Dataset).where(Dataset.deleted_at.is_(None))
+            )
+            for d_rec in all_ds_res.scalars().all():
+                if d_rec.table_name and (
+                    f'"{d_rec.table_name.lower()}"' in sql.lower()
+                    or f" {d_rec.table_name.lower()} " in sql.lower()
+                    or f".{d_rec.table_name.lower()} " in sql.lower()
+                    or sql.lower().strip().endswith(d_rec.table_name.lower())
+                ):
+                    db_res3 = await session.execute(
+                        select(DatabaseConnection).where(
+                            DatabaseConnection.id == d_rec.database_id,
+                            DatabaseConnection.deleted_at.is_(None),
+                        )
+                    )
+                    candidate_conn = db_res3.scalar_one_or_none()
+                    if candidate_conn and not candidate_conn.is_system:
+                        db_conn = candidate_conn
+                        break
+        except Exception:
+            pass
+
+    dialect = (db_conn.dialect or "duckdb").lower() if db_conn else "duckdb"
+    if dialect in ("postgresql", "postgres"):
+        dialect = "postgres"
+
+    # 2. Enforce AST security constraints
     try:
         validated_sql = AISQLGuard.validate_and_constrain(
             sql=sql,
-            dialect="duckdb",
-            max_rows=max_rows,
+            dialect=dialect,
+            max_rows=effective_max_rows,
         )
     except Exception as e:
         return {
@@ -212,29 +280,16 @@ async def tool_execute_sql_query(
             "sql": sql,
         }
 
-    # 2. Execute on specified database or default internal DuckDB
+    # 3. Execute on resolved database connection or fallback to internal DuckDB
     try:
-        if database_id:
-            try:
-                db_uid = uuid.UUID(database_id)
-                db_res = await session.execute(
-                    select(DatabaseConnection).where(
-                        DatabaseConnection.id == db_uid,
-                        DatabaseConnection.deleted_at.is_(None),
-                    )
-                )
-                db_conn = db_res.scalar_one_or_none()
-                if not db_conn:
-                    return {"success": False, "error": f"Database {database_id} not found."}
-                connector = get_connector(db_conn)
-            except Exception as e:
-                return {"success": False, "error": f"Invalid database ID: {str(e)}"}
+        if db_conn:
+            connector = get_connector(db_conn)
         else:
             connector = DuckDBConnector()
 
         result = connector.execute_query(
             sql=validated_sql,
-            limit=max_rows,
+            limit=effective_max_rows,
             timeout_seconds=settings.STATEMENT_TIMEOUT_SECONDS,
         )
 

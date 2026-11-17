@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
@@ -15,6 +15,7 @@ import {
   Clock,
   LayoutGrid,
   BarChart3,
+  Compass,
 } from "lucide-react";
 import { api, DashboardItem, ChartItem } from "@/app/api";
 import { chartRegistry } from "@/charts";
@@ -26,15 +27,34 @@ const DashboardChartTile: React.FC<{
   activeFilters: Record<string, any>;
   onRemove?: () => void;
   isEditMode?: boolean;
-}> = ({ chartId, charts, activeFilters, onRemove, isEditMode }) => {
+}> = ({ chartId, charts, activeFilters, onRemove, isEditMode: _isEditMode }) => {
   const chart = charts.find((c) => c.id === chartId);
   const navigate = useNavigate();
+  const tileRef = useRef<HTMLDivElement | null>(null);
+  const [isInView, setIsInView] = useState(false);
+
+  useEffect(() => {
+    if (!tileRef.current) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsInView(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "300px" }
+    );
+    observer.observe(tileRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  const isHeader = chart?.viz_type === "header" || chart?.params?.is_section_header;
 
   // Execute query for this specific chart with active dashboard filters applied
   const { data: chartData, isLoading, refetch } = useQuery({
     queryKey: ["chartData", chartId, activeFilters],
     queryFn: async () => {
-      if (!chart) return null;
+      if (!chart || isHeader) return null;
       const p = chart.params || {};
 
       // Merge chart-level filters with active dashboard filters
@@ -56,22 +76,66 @@ const DashboardChartTile: React.FC<{
         row_limit: p.row_limit || 200,
       });
     },
-    enabled: Boolean(chart),
+    enabled: Boolean(chart) && !isHeader && isInView,
   });
 
   if (!chart) {
     return (
-      <div className="h-full w-full flex items-center justify-center p-4 bg-white border border-slate-200 rounded-xl text-slate-400 text-xs">
+      <div ref={tileRef} className="h-full w-full flex items-center justify-center p-4 bg-white border border-slate-200 rounded-xl text-slate-400 text-xs">
         Chart not found or deleted.
       </div>
     );
   }
 
+  if (isHeader) {
+    const secId = chart.params?.section_id || chart.id;
+    return (
+      <div
+        ref={tileRef}
+        id={`section-${secId}`}
+        className="w-full flex items-center justify-between border-b-2 border-blue-500/30 pb-2 mb-1 bg-white/80 backdrop-blur p-4 rounded-xl shadow-xs border border-slate-200/80"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+            <Layers className="w-4 h-4" />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold text-slate-900 tracking-tight">{chart.title}</h2>
+            {chart.params?.subtitle && (
+              <p className="text-xs text-slate-500">{chart.params.subtitle}</p>
+            )}
+          </div>
+        </div>
+        {onRemove && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (window.confirm("Remove this section header?")) {
+                onRemove();
+              }
+            }}
+            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition"
+            title="Remove section header"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+    );
+  }
+
   const plugin = chartRegistry.get(chart.viz_type);
-  const chartProps = plugin && chartData ? plugin.transformProps(chartData, chart.params?.options) : null;
+  const chartProps =
+    plugin && chartData
+      ? plugin.transformProps(chartData, {
+          ...(chart.params?.options || {}),
+          dimensions: chart.params?.dimensions || (chart.params?.dimension ? [chart.params.dimension] : []),
+          metrics: chart.params?.metrics,
+        })
+      : null;
 
   return (
-    <div className="h-full w-full flex flex-col bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md transition overflow-hidden">
+    <div ref={tileRef} className="h-full w-full flex flex-col bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md transition overflow-hidden">
       {/* Tile Header */}
       <div className="px-4 py-2.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
         <div className="flex items-center gap-2 truncate">
@@ -93,13 +157,18 @@ const DashboardChartTile: React.FC<{
           >
             <ExternalLink className="w-3.5 h-3.5" />
           </button>
-          {isEditMode && onRemove && (
+          {onRemove && (
             <button
-              onClick={onRemove}
-              className="p-1 text-slate-400 hover:text-red-600 rounded transition ml-1"
-              title="Remove from dashboard"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (window.confirm(`Delete "${chart.title}" from this dashboard?`)) {
+                  onRemove();
+                }
+              }}
+              className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition ml-1"
+              title="Delete chart from dashboard"
             >
-              ✕
+              <Trash2 className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
@@ -483,19 +552,57 @@ export const DashboardsPage: React.FC = () => {
             </div>
           )}
 
+          {/* Sticky Section Jump List */}
+          {activeDashboard && (() => {
+            const sectionHeaders = activeDashboard.charts
+              .map((p) => allCharts.find((c) => c.id === p.chart_id))
+              .filter((c): c is ChartItem => Boolean(c && (c.viz_type === "header" || c.params?.is_section_header)));
+
+            if (sectionHeaders.length <= 1) return null;
+
+            return (
+              <div className="sticky top-0 z-20 bg-slate-50/95 backdrop-blur py-2 px-3 border border-slate-200 rounded-xl shadow-xs flex items-center gap-2 overflow-x-auto no-scrollbar">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1 shrink-0">
+                  <Compass className="w-3.5 h-3.5 text-blue-600" /> Jump to:
+                </span>
+                {sectionHeaders.map((hdr) => (
+                  <button
+                    key={hdr.id}
+                    onClick={() => {
+                      const el = document.getElementById(`section-${hdr.params?.section_id || hdr.id}`);
+                      if (el) {
+                        el.scrollIntoView({ behavior: "smooth", block: "start" });
+                      }
+                    }}
+                    className="px-2.5 py-1 bg-white border border-slate-200 hover:border-blue-400 hover:text-blue-600 rounded-full text-xs font-medium text-slate-700 whitespace-nowrap shadow-xs transition"
+                  >
+                    {hdr.title}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
+
           {/* Charts Responsive Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 min-h-[500px]">
-            {activeDashboard.charts.map((placement) => (
-              <div key={placement.id} className="min-h-[360px] h-[380px]">
-                <DashboardChartTile
-                  chartId={placement.chart_id}
-                  charts={allCharts}
-                  activeFilters={activeFilters}
-                  isEditMode={isEditMode}
-                  onRemove={() => handleRemoveChartFromDashboard(placement.chart_id)}
-                />
-              </div>
-            ))}
+            {activeDashboard.charts.map((placement) => {
+              const ch = allCharts.find((c) => c.id === placement.chart_id);
+              const isHeader = ch?.viz_type === "header" || ch?.params?.is_section_header;
+              return (
+                <div
+                  key={placement.id}
+                  className={isHeader ? "col-span-full pt-4 pb-1" : "min-h-[360px] h-[380px]"}
+                >
+                  <DashboardChartTile
+                    chartId={placement.chart_id}
+                    charts={allCharts}
+                    activeFilters={activeFilters}
+                    isEditMode={isEditMode}
+                    onRemove={() => handleRemoveChartFromDashboard(placement.chart_id)}
+                  />
+                </div>
+              );
+            })}
           </div>
 
           {activeDashboard.charts.length === 0 && (

@@ -15,7 +15,7 @@ export function AppShell() {
 
       {/* Main Content Viewport */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
-        <TopBar onOpenAIDrawer={() => setAiDrawerOpen(true)} />
+        <TopBar />
 
         <main className="flex-1 overflow-y-auto p-6 bg-slate-50/50 dark:bg-slate-950/20">
           <Outlet />

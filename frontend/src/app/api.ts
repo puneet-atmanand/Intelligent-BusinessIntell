@@ -81,6 +81,194 @@ export interface DatasetMetric {
   description?: string;
 }
 
+// API Connect Interfaces
+export interface ApiConnection {
+  id: string;
+  owner_id?: string;
+  name: string;
+  base_url: string;
+  description?: string;
+  auth_type: string;
+  auth_config: Record<string, any>;
+  default_headers: Record<string, string>;
+  timeout_seconds: number;
+  max_retries: number;
+  verify_ssl: boolean;
+  status: string;
+  last_tested_at?: string;
+  last_test_result?: Record<string, any>;
+  endpoint_count: number;
+  table_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiConnectionCreatePayload {
+  name: string;
+  base_url: string;
+  description?: string;
+  auth_type: string;
+  auth_config?: Record<string, any>;
+  secret?: string;
+  default_headers?: Record<string, string>;
+  timeout_seconds?: number;
+  max_retries?: number;
+  verify_ssl?: boolean;
+}
+
+export interface ApiConnectionUpdatePayload {
+  name?: string;
+  base_url?: string;
+  description?: string;
+  auth_type?: string;
+  auth_config?: Record<string, any>;
+  secret?: string;
+  default_headers?: Record<string, string>;
+  timeout_seconds?: number;
+  max_retries?: number;
+  verify_ssl?: boolean;
+}
+
+export interface ApiConnectionTestRequest {
+  base_url: string;
+  auth_type?: string;
+  auth_config?: Record<string, any>;
+  secret?: string;
+  headers?: Record<string, string>;
+  verify_ssl?: boolean;
+}
+
+export interface ApiConnectionTestResponse {
+  success: boolean;
+  status_code: number;
+  message: string;
+  duration_ms: number;
+  details?: Record<string, any>;
+}
+
+export interface ApiExploreRequest {
+  connection_id?: string;
+  path_or_url: string;
+  method?: string;
+  headers?: Record<string, string>;
+  query_params?: Record<string, any>;
+  body?: any;
+  pagination_config?: Record<string, any>;
+  response_path?: string;
+  sample_limit?: number;
+}
+
+export interface ApiExploreResponse {
+  success: boolean;
+  status_code: number;
+  duration_ms: number;
+  content_type: string;
+  error_message?: string;
+  raw_json?: any;
+  preview_records: Record<string, any>[];
+  detected_schema: Record<string, string>;
+  total_records_extracted: number;
+}
+
+export interface OpenApiImportRequest {
+  url?: string;
+  spec_content?: string;
+}
+
+export interface OpenApiEndpoint {
+  name: string;
+  path: string;
+  method: string;
+  summary: string;
+  description: string;
+  operation_id: string;
+  tags: string[];
+  query_params: Record<string, any>;
+  headers: Record<string, string>;
+}
+
+export interface OpenApiImportResponse {
+  title: string;
+  description: string;
+  version: string;
+  base_url: string;
+  endpoints: OpenApiEndpoint[];
+}
+
+export interface ApiDatasetCollection {
+  id: string;
+  owner_id?: string;
+  name: string;
+  description?: string;
+  tags: string[];
+  table_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiDatasetTable {
+  id: string;
+  collection_id: string;
+  connection_id: string;
+  endpoint_id?: string;
+  semantic_dataset_id?: string;
+  dashboard_id?: string;
+  dashboard_slug?: string;
+  display_name: string;
+  table_name: string;
+  storage_mode: string;
+  record_count: number;
+  column_count: number;
+  schema_metadata: Record<string, string>;
+  last_synced_at?: string;
+  materialization_status: string;
+  last_error?: string;
+  endpoint_path?: string;
+  endpoint_method?: string;
+  parquet_size_bytes?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiCollectionWithTables extends ApiDatasetCollection {
+  tables: ApiDatasetTable[];
+}
+
+export interface ApiTableCreatePayload {
+  collection_id: string;
+  connection_id: string;
+  display_name: string;
+  table_name: string;
+  storage_mode?: string;
+  endpoint_id?: string;
+  endpoint_spec?: {
+    name?: string;
+    path: string;
+    method?: string;
+    headers?: Record<string, string>;
+    query_params?: Record<string, any>;
+    body?: string;
+    pagination_config?: Record<string, any>;
+    response_path?: string;
+  };
+  auto_materialize?: boolean;
+  cron_schedule?: string;
+}
+
+export interface ApiSyncRun {
+  id: string;
+  table_id: string;
+  job_id?: string;
+  status: string;
+  records_fetched: number;
+  records_written: number;
+  execution_duration_ms: number;
+  error_message?: string;
+  snapshot_path?: string;
+  started_at: string;
+  completed_at?: string;
+}
+
 export interface DatasetItem {
   id: string;
   name: string;
@@ -95,6 +283,186 @@ export interface DatasetItem {
   columns: DatasetColumn[];
   metrics: DatasetMetric[];
   created_at: string;
+}
+
+export interface DatasetColumnProfile {
+  name: string;
+  verbose_name: string;
+  data_type: string;
+  is_dimension: boolean;
+  is_datetime: boolean;
+  total_rows: number;
+  null_count: number;
+  null_percentage: number;
+  distinct_count: number;
+  min?: number | string | null;
+  max?: number | string | null;
+  avg?: number | null;
+  top_values?: Array<{ value: string; count: number }> | null;
+}
+
+export interface DatasetProfileResponse {
+  dataset_id: string;
+  dataset_name: string;
+  table_name?: string;
+  total_rows: number;
+  columns: DatasetColumnProfile[];
+}
+
+export interface DatasetRowsResponse {
+  dataset_id: string;
+  total: number;
+  limit: number;
+  offset: number;
+  page: number;
+  total_pages: number;
+  columns: string[];
+  column_types: string[];
+  rows: any[][];
+  duration_ms: number;
+}
+
+// --- Table Join Assistant Interfaces ---
+export interface ForeignKeyInfo {
+  constraint_name: string;
+  columns: string[];
+  referred_schema: string;
+  referred_table: string;
+  referred_columns: string[];
+}
+
+export interface TableColumnInfo {
+  name: string;
+  data_type: string;
+}
+
+export interface TableKeyInfo {
+  schema: string;
+  table: string;
+  primary_key: string[];
+  foreign_keys: ForeignKeyInfo[];
+  columns: TableColumnInfo[];
+}
+
+export interface DatabaseKeysResponse {
+  database_id?: string;
+  tables: TableKeyInfo[];
+}
+
+export interface JoinSuggestion {
+  left_columns: string[];
+  right_columns: string[];
+  source: "foreign_key" | "name_match";
+  confidence: number;
+  description?: string;
+}
+
+export interface JoinSuggestionsResponse {
+  suggestions: JoinSuggestion[];
+}
+
+export interface JoinCondition {
+  left_col: string;
+  right_col: string;
+}
+
+export interface JoinColumnSelect {
+  table: "t1" | "t2";
+  column: string;
+  alias?: string;
+}
+
+export interface JoinBuildSqlRequest {
+  left: string;
+  right: string;
+  join_type?: string;
+  conditions?: JoinCondition[];
+  columns?: JoinColumnSelect[];
+  select_all?: boolean;
+  where?: string;
+  limit?: number;
+  offset?: number;
+  include_limit?: boolean;
+}
+
+export interface JoinBuildSqlResponse {
+  sql: string;
+  dialect: string;
+  is_emulated: boolean;
+  notes?: string;
+}
+
+export interface JoinRunRequest {
+  left: string;
+  right: string;
+  join_type?: string;
+  conditions?: JoinCondition[];
+  columns?: JoinColumnSelect[];
+  select_all?: boolean;
+  where?: string;
+  limit?: number;
+  offset?: number;
+  custom_sql?: string;
+}
+
+export interface JoinRunResponse {
+  columns: string[];
+  column_types: string[] | Record<string, string>;
+  rows: any[][];
+  row_count: number;
+  limit: number;
+  offset: number;
+  is_truncated: boolean;
+  execution_duration_ms: number;
+  sql: string;
+}
+
+export interface ParentRowInfo {
+  constraint_name: string;
+  parent_table: string;
+  fk_columns: string[];
+  referred_columns: string[];
+  row: Record<string, any> | null;
+}
+
+export interface ChildRowsInfo {
+  child_table: string;
+  fk_columns: string[];
+  referred_columns: string[];
+  count: number;
+  columns: string[];
+  rows: any[][];
+}
+
+export interface RowsByKeyResponse {
+  table: string;
+  key_columns: string[];
+  key_values: any[];
+  row: Record<string, any> | null;
+  columns: string[];
+  parents: ParentRowInfo[];
+  children: ChildRowsInfo[];
+}
+
+export interface DatasetFromJoinRequest {
+  database_id: string;
+  name: string;
+  sql: string;
+  description?: string;
+  left_table?: string;
+  right_table?: string;
+  join_type?: string;
+  create_dashboard?: boolean;
+}
+
+export interface DatasetFromJoinResponse {
+  dataset_id: string;
+  name: string;
+  sql_expression: string;
+  columns_count: number;
+  dashboard_slug?: string;
+  dashboard_id?: string;
+  message: string;
 }
 
 export interface ChartItem {
@@ -222,6 +590,89 @@ export interface SavedQueryItem {
   created_at: string;
 }
 
+export interface TableInventoryItem {
+  name: string;
+  type: string;
+  row_count_estimate?: number | null;
+}
+
+export interface SchemaInventoryItem {
+  name: string;
+  tables: TableInventoryItem[];
+}
+
+export interface DatabaseInventoryResponse {
+  database_id?: string;
+  database_name?: string;
+  schemas: SchemaInventoryItem[];
+}
+
+export interface BulkDatasetItem {
+  schema_name?: string;
+  table_name: string;
+}
+
+export interface BulkDatasetCreateRequest {
+  database_id: string;
+  items: BulkDatasetItem[];
+  create_dashboards?: boolean;
+}
+
+export interface BulkDatasetItemResult {
+  schema?: string;
+  table: string;
+  schema_name?: string;
+  table_name?: string;
+  status: "created" | "skipped_existing" | "failed";
+  dataset_id?: string | null;
+  dashboard_slug?: string | null;
+  error?: string | null;
+}
+
+export interface BulkDatasetCreateResponse {
+  total_requested: number;
+  created_count: number;
+  skipped_count: number;
+  failed_count: number;
+  results: BulkDatasetItemResult[];
+}
+
+export interface AutoVisualizeTableItem {
+  schema_name?: string;
+  table_name: string;
+}
+
+export interface AutoVisualizeRequest {
+  schemas?: string[];
+  tables?: AutoVisualizeTableItem[];
+  per_table_dashboards?: boolean;
+  unified_dashboard?: boolean;
+}
+
+export interface PerTableDashboardSummary {
+  schema?: string;
+  table: string;
+  dashboard_slug?: string | null;
+  title?: string | null;
+  status: string;
+  dataset_id?: string | null;
+  error?: string | null;
+}
+
+export interface AutoVisualizeResponse {
+  database_id: string;
+  database_name: string;
+  per_table_dashboards_created: number;
+  per_table_dashboards: PerTableDashboardSummary[];
+  unified_dashboard_slug?: string | null;
+  unified_dashboard_title?: string | null;
+  sections_count: number;
+  charts_count: number;
+  columns_visualized: Record<string, string[]>;
+  columns_trimmed: Record<string, string[]>;
+  summary: string;
+}
+
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers || {});
   if (!headers.has("Content-Type") && !(options.body instanceof FormData)) {
@@ -274,6 +725,15 @@ export const api = {
     request<ConnectionTestResult>(`/api/v1/databases/${id}/test`, {
       method: "POST",
     }),
+  getDatabaseInventory: (id: string) =>
+    request<DatabaseInventoryResponse>(`/api/v1/databases/${id}/inventory`, {
+      method: "POST",
+    }),
+  autoVisualizeDatabase: (id: string, data?: AutoVisualizeRequest) =>
+    request<AutoVisualizeResponse>(`/api/v1/databases/${id}/auto-visualize`, {
+      method: "POST",
+      body: JSON.stringify(data || {}),
+    }),
   getDatabaseSchemas: (id: string) =>
     request<string[]>(`/api/v1/databases/${id}/schemas`),
   getDatabaseTables: (id: string, schema?: string) =>
@@ -284,6 +744,33 @@ export const api = {
     request<any[]>(
       `/api/v1/databases/${id}/tables/${encodeURIComponent(table)}/columns${schema ? `?schema=${encodeURIComponent(schema)}` : ""}`
     ),
+
+  // Table Join Assistant
+  getDatabaseKeys: (id: string, refresh: boolean = false) =>
+    request<DatabaseKeysResponse>(`/api/v1/databases/${id}/keys${refresh ? "?refresh=true" : ""}`),
+  getJoinSuggestions: (id: string, left: string, right: string) =>
+    request<JoinSuggestionsResponse>(
+      `/api/v1/databases/${id}/join-suggestions?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`
+    ),
+  buildJoinSql: (id: string, data: JoinBuildSqlRequest) =>
+    request<JoinBuildSqlResponse>(`/api/v1/databases/${id}/join-builder/sql`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  runJoinQuery: (id: string, data: JoinRunRequest) =>
+    request<JoinRunResponse>(`/api/v1/databases/${id}/join-builder/run`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  getRowsByKey: (id: string, table: string, keyCol: string, keyValue: string) =>
+    request<RowsByKeyResponse>(
+      `/api/v1/databases/${id}/rows-by-key?table=${encodeURIComponent(table)}&key_col=${encodeURIComponent(keyCol)}&key_value=${encodeURIComponent(keyValue)}`
+    ),
+  createDatasetFromJoin: (data: DatasetFromJoinRequest) =>
+    request<DatasetFromJoinResponse>("/api/v1/datasets/from-join", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
   // Uploads
   previewUpload: (formData: FormData) =>
@@ -305,8 +792,23 @@ export const api = {
   // Datasets
   getDatasets: () => request<DatasetItem[]>("/api/v1/datasets/"),
   getDataset: (id: string) => request<DatasetItem>(`/api/v1/datasets/${id}`),
+  getDatasetProfile: (id: string) => request<DatasetProfileResponse>(`/api/v1/datasets/${id}/profile`),
+  getDatasetRows: (id: string, params: { limit?: number; offset?: number; order_by?: string; order_dir?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (params.limit !== undefined) q.set("limit", String(params.limit));
+    if (params.offset !== undefined) q.set("offset", String(params.offset));
+    if (params.order_by) q.set("order_by", params.order_by);
+    if (params.order_dir) q.set("order_dir", params.order_dir);
+    const qs = q.toString();
+    return request<DatasetRowsResponse>(`/api/v1/datasets/${id}/rows${qs ? `?${qs}` : ""}`);
+  },
   createDataset: (data: any) =>
     request<DatasetItem>("/api/v1/datasets/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  bulkCreateDatasets: (data: BulkDatasetCreateRequest) =>
+    request<BulkDatasetCreateResponse>("/api/v1/datasets/bulk", {
       method: "POST",
       body: JSON.stringify(data),
     }),
@@ -385,4 +887,84 @@ export const api = {
   getAIConversations: () => request<Array<{ id: string; title: string; created_at: string }>>("/api/v1/ai/conversations"),
   getAIConversationMessages: (conversationId: string) =>
     request<any[]>(`/api/v1/ai/conversations/${conversationId}/messages`),
+
+  // API Connect
+  getApiConnections: () => request<ApiConnection[]>("/api/v1/api-connect/connections"),
+  getApiConnection: (id: string) => request<ApiConnection>(`/api/v1/api-connect/connections/${id}`),
+  createApiConnection: (data: ApiConnectionCreatePayload) =>
+    request<ApiConnection>("/api/v1/api-connect/connections", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateApiConnection: (id: string, data: ApiConnectionUpdatePayload) =>
+    request<ApiConnection>(`/api/v1/api-connect/connections/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deleteApiConnection: (id: string) =>
+    request<void>(`/api/v1/api-connect/connections/${id}`, {
+      method: "DELETE",
+    }),
+  testAdhocApiConnection: (data: ApiConnectionTestRequest) =>
+    request<ApiConnectionTestResponse>("/api/v1/api-connect/connections/test", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  testSavedApiConnection: (id: string) =>
+    request<ApiConnectionTestResponse>(`/api/v1/api-connect/connections/${id}/test`, {
+      method: "POST",
+    }),
+  exploreApiEndpoint: (data: ApiExploreRequest) =>
+    request<ApiExploreResponse>("/api/v1/api-connect/explore", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  importOpenApiSpec: (data: OpenApiImportRequest) =>
+    request<OpenApiImportResponse>("/api/v1/api-connect/openapi/import", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  getApiCollections: () => request<ApiDatasetCollection[]>("/api/v1/api-connect/collections"),
+  getApiCollection: (id: string) => request<ApiCollectionWithTables>(`/api/v1/api-connect/collections/${id}`),
+  createApiCollection: (data: { name: string; description?: string; tags?: string[] }) =>
+    request<ApiDatasetCollection>("/api/v1/api-connect/collections", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateApiCollection: (id: string, data: { name?: string; description?: string; tags?: string[] }) =>
+    request<ApiDatasetCollection>(`/api/v1/api-connect/collections/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deleteApiCollection: (id: string) =>
+    request<void>(`/api/v1/api-connect/collections/${id}`, {
+      method: "DELETE",
+    }),
+  createApiTable: (data: ApiTableCreatePayload) =>
+    request<ApiDatasetTable>("/api/v1/api-connect/tables", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  deleteApiTable: (id: string) =>
+    request<void>(`/api/v1/api-connect/tables/${id}`, {
+      method: "DELETE",
+    }),
+  refreshApiTable: (id: string) =>
+    request<any>(`/api/v1/api-connect/tables/${id}/refresh`, {
+      method: "POST",
+    }),
+  visualizeApiTable: (tableId: string) =>
+    request<{
+      status: string;
+      dashboard_id: string;
+      dashboard_slug: string;
+      dashboard_title: string;
+      dataset_id: string;
+      primary_chart_id?: string;
+      charts_count: number;
+    }>(`/api/v1/api-connect/tables/${tableId}/visualize`, {
+      method: "POST",
+    }),
+  getApiTableSyncRuns: (id: string) =>
+    request<ApiSyncRun[]>(`/api/v1/api-connect/tables/${id}/runs`),
 };

@@ -1,13 +1,8 @@
 import { useState } from "react";
-import { Sparkles, Sun, Moon, RotateCcw } from "lucide-react";
-import { Button } from "@/components/ui/Button";
+import { Sun, Moon, RotateCcw } from "lucide-react";
 import { useAuthStore } from "@/features/auth/authStore";
 
-interface TopBarProps {
-  onOpenAIDrawer: () => void;
-}
-
-export function TopBar({ onOpenAIDrawer }: TopBarProps) {
+export function TopBar() {
   const { user } = useAuthStore();
   const [isDark, setIsDark] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -32,17 +27,6 @@ export function TopBar({ onOpenAIDrawer }: TopBarProps) {
 
       {/* Right Controls */}
       <div className="flex items-center gap-3">
-        {/* Ask AI Trigger Button */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onOpenAIDrawer}
-          className="gap-2 border-primary/30 text-primary hover:bg-primary/5"
-        >
-          <Sparkles className="h-3.5 w-3.5" />
-          <span className="text-xs font-semibold">Ask AI</span>
-        </Button>
-
         {/* Theme Toggle */}
         <button
           onClick={toggleTheme}

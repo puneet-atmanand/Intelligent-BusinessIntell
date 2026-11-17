@@ -47,12 +47,27 @@ const transformProps = (
     return { option: { title: { text: "No data available", left: "center", top: "center" } } };
   }
 
-  const categoryColIdx = 0;
-  const categories = rows.map((r) => String(r[categoryColIdx] ?? ""));
-  const metricCols = columns.slice(1);
+  const dimCount = Math.max(
+    1,
+    Array.isArray(options.dimensions) && options.dimensions.length > 0
+      ? options.dimensions.length
+      : 1
+  );
+  const effectiveDimCount = Math.min(dimCount, Math.max(1, columns.length - 1));
+
+  const categories = rows.map((r) =>
+    r
+      .slice(0, effectiveDimCount)
+      .map((v) => (v === null ? "null" : String(v)))
+      .join(" / ")
+  );
+  const metricCols = columns.slice(effectiveDimCount);
 
   const series = metricCols.map((col, idx) => {
-    const data = rows.map((r) => r[idx + 1] ?? 0);
+    const data = rows.map((r) => {
+      const val = r[effectiveDimCount + idx];
+      return typeof val === "number" ? val : Number(val) || 0;
+    });
     return {
       name: col,
       type: "bar",
@@ -69,7 +84,7 @@ const transformProps = (
     tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
     legend: { top: 10 },
     grid: { left: "4%", right: "4%", bottom: "8%", top: 50, containLabel: true },
-    xAxis: isHorizontal ? { type: "value" } : { type: "category", data: categories, axisLabel: { interval: 0, rotate: categories.length > 8 ? 30 : 0 } },
+    xAxis: isHorizontal ? { type: "value" } : { type: "category", data: categories, axisLabel: { interval: 0, rotate: categories.length > 6 ? 30 : 0 } },
     yAxis: isHorizontal ? { type: "category", data: categories } : { type: "value" },
     series,
   };
