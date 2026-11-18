@@ -1,0 +1,4 @@
+# Ask Your Data - Backend Requirements Reference
+# Install directly from repository root via:
+#   pip install -r requirements.txt
+-r backend/requirements.txt

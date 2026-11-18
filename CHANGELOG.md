@@ -5,6 +5,30 @@ All notable changes to the **Ask Your Data** platform will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-11-18
+
+### Added
+- **Unified Database Auto-Visualization**:
+  - Bulk dataset & dashboard generator with multi-schema table selection.
+  - Three visualization modes: Separate per-table + Unified, Unified only, and Separate only.
+  - Deep-linking & URL routing support by dashboard slug or UUID (`/dashboards/:slug`).
+  - Auto-generated KPI summary cards and cross-schema categorized charts.
+- **Visual Table Join Assistant**:
+  - Automated foreign key discovery and heuristic relationship inference across schemas.
+  - Visual Join Assistant modal with `INNER`, `LEFT`, `RIGHT`, and `FULL` join types.
+  - Live SQL query generation, data preview, and reusable virtual dataset creation.
+- **API Connect & OpenAPI Ingestion**:
+  - REST API endpoint connector with OpenAPI 3.0/3.1 and Swagger 2.0 importer (JSON and YAML).
+  - SSRF Guard protecting internal network ranges, metadata endpoints, and localhost.
+  - Multi-strategy pagination (page, offset/limit, cursor, Link headers) and DuckDB columnar materialization.
+- **Multi-Axis & Multi-Metric Chart Builder**:
+  - Support for multiple dimensions and metrics across both X and Y axes.
+  - Individual metric deletion pills (`x`) for quick customization.
+  - DuckDB temporal column validation and type-safe date handling.
+- **Multi-Provider AI Architecture**:
+  - Seamless environment-driven switching between Groq, Google Gemini, OpenAI, Claude, and Ollama.
+  - Strict numeric grounding guardrails verifying every reported number against executed SQL results.
+
 ## [0.1.0] - Phase 0: Plan and Scaffold - 2026-11-06
 
 ### Added
