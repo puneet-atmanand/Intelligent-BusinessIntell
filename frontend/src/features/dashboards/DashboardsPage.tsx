@@ -53,7 +53,7 @@ const DashboardChartTile: React.FC<{
   const isHeader = chart?.viz_type === "header" || chart?.params?.is_section_header;
 
   // Execute query for this specific chart with active dashboard filters applied
-  const { data: chartData, isLoading, refetch } = useQuery({
+  const { data: chartData, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["chartData", chartId, activeFilters],
     queryFn: async () => {
       if (!chart || isHeader) return null;
@@ -192,10 +192,18 @@ const DashboardChartTile: React.FC<{
             Loading query...
           </div>
         )}
-        {!isLoading && plugin && chartProps && (
+        {!isLoading && isError && (
+          <div className="h-full flex flex-col items-center justify-center text-red-500 text-xs p-3 text-center">
+            <span className="font-semibold text-red-700 mb-1">Query Failed</span>
+            <span className="text-[11px] text-red-600/90 line-clamp-3">
+              {(error as any)?.response?.data?.message || (error as any)?.message || "Failed to load chart data"}
+            </span>
+          </div>
+        )}
+        {!isLoading && !isError && plugin && chartProps && (
           <plugin.Renderer {...chartProps} height="100%" />
         )}
-        {!isLoading && !chartData && (
+        {!isLoading && !isError && !chartData && (
           <div className="h-full flex items-center justify-center text-slate-400 text-xs">
             No data returned.
           </div>

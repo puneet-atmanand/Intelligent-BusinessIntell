@@ -3,7 +3,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,15 @@ class SQLExecuteRequest(BaseModel):
     schema_name: Optional[str] = "main"
     parameters: Dict[str, Any] = {}
     row_limit: int = 1000
+    limit: Optional[int] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_limit_alias(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "limit" in data and "row_limit" not in data:
+                data["row_limit"] = data["limit"]
+        return data
 
 
 class SavedQueryCreate(BaseModel):
@@ -62,6 +71,7 @@ async def execute_sql(
         dialect=db_conn.dialect,
         allow_dml=db_conn.allow_dml,
         row_limit=max_limit,
+        force_limit=True,
     )
 
     # 3. Create initial query history record
@@ -144,6 +154,7 @@ async def get_query_history(
 
 
 @router.get("/saved")
+@router.get("/saved-queries")
 async def list_saved_queries(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(require_permission("sqllab:use")),
@@ -174,6 +185,7 @@ async def list_saved_queries(
 
 
 @router.post("/saved", status_code=status.HTTP_201_CREATED)
+@router.post("/saved-queries", status_code=status.HTTP_201_CREATED)
 async def create_saved_query(
     payload: SavedQueryCreate,
     session: AsyncSession = Depends(get_db_session),
@@ -195,6 +207,7 @@ async def create_saved_query(
 
 
 @router.delete("/saved/{id}")
+@router.delete("/saved-queries/{id}")
 async def delete_saved_query(
     id: uuid.UUID,
     session: AsyncSession = Depends(get_db_session),

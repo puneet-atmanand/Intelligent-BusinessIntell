@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   GitMerge,
   Key,
@@ -54,6 +55,7 @@ export const JoinAssistantModal: React.FC<JoinAssistantModalProps> = ({
   initialRightTable,
 }) => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   // Keys & inventory metadata
   const [tablesList, setTablesList] = useState<TableKeyInfo[]>([]);
@@ -278,10 +280,14 @@ export const JoinAssistantModal: React.FC<JoinAssistantModalProps> = ({
   const handleOpenInSqlLab = () => {
     if (!generatedSql) return;
     onClose();
+    const tabTitle = leftTable && rightTable
+      ? `${leftTable.split(".").pop()} + ${rightTable.split(".").pop()}`
+      : "Join Query";
     navigate("/sqllab", {
       state: {
         initialSql: generatedSql,
         databaseId: database.id,
+        title: tabTitle,
       },
     });
   };
@@ -312,6 +318,10 @@ export const JoinAssistantModal: React.FC<JoinAssistantModalProps> = ({
         join_type: joinType,
         create_dashboard: true,
       });
+
+      await queryClient.invalidateQueries({ queryKey: ["datasets"] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboards"] });
+      await queryClient.invalidateQueries({ queryKey: ["charts"] });
 
       setSavedDatasetSuccess({
         id: res.dataset_id,
@@ -356,6 +366,10 @@ export const JoinAssistantModal: React.FC<JoinAssistantModalProps> = ({
         join_type: joinType,
         create_dashboard: true,
       });
+
+      await queryClient.invalidateQueries({ queryKey: ["datasets"] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboards"] });
+      await queryClient.invalidateQueries({ queryKey: ["charts"] });
 
       onClose();
       navigate(`/charts?dataset=${res.dataset_id}`);

@@ -47,6 +47,11 @@ from app.services.api_connect.normalizer import normalize_api_data, sanitize_fie
 from app.services.api_connect.openapi_importer import OpenApiParser, parse_openapi_content
 from app.services.api_connect.paginator import ApiPaginator
 from app.services.api_connect.sync_engine import execute_sync_for_table
+from app.services.cascade_delete_service import (
+    delete_api_collection_cascade,
+    delete_api_connection_cascade,
+    delete_api_table_cascade,
+)
 
 router = APIRouter(prefix="/api-connect", tags=["API Connect"])
 
@@ -199,12 +204,8 @@ async def delete_connection(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(require_permission("database:delete")),
 ):
-    """Delete an API connection."""
-    conn = await session.get(ApiConnection, conn_id)
-    if not conn or conn.deleted_at:
-        raise NotFoundError(f"Connection {conn_id} not found")
-    await session.delete(conn)
-    await session.commit()
+    """Delete an API connection and cascade to its tables, datasets, charts & dashboards."""
+    await delete_api_connection_cascade(session=session, connection_id=conn_id)
 
 
 @router.post("/connections/test", response_model=ApiConnectionTestResponse)
@@ -557,12 +558,8 @@ async def delete_collection(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(require_permission("dataset:delete")),
 ):
-    """Delete a dataset collection and all its tables."""
-    col = await session.get(ApiDatasetCollection, col_id)
-    if not col or col.deleted_at:
-        raise NotFoundError(f"Collection {col_id} not found")
-    await session.delete(col)
-    await session.commit()
+    """Delete a dataset collection and cascade to all its tables, datasets, charts & dashboards."""
+    await delete_api_collection_cascade(session=session, collection_id=col_id)
 
 
 @router.post("/tables", response_model=ApiTableOut, status_code=status.HTTP_201_CREATED)
@@ -680,31 +677,8 @@ async def delete_table(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(require_permission("dataset:delete")),
 ):
-    """Delete an API table, dropping its DuckDB table and semantic dataset."""
-    table = await session.get(ApiDatasetTable, table_id)
-    if not table or table.deleted_at:
-        raise NotFoundError(f"Table {table_id} not found")
-
-    collection = await session.get(ApiDatasetCollection, table.collection_id)
-    clean_col = sanitize_field_name(collection.name if collection else "api")
-    clean_tbl = sanitize_field_name(table.table_name)
-    physical_name = f"api_{clean_col}_{clean_tbl}"
-
-    try:
-        with duckdb_write_lock:
-            wconn = duckdb.connect(settings.DUCKDB_DATABASE_PATH, read_only=False)
-            wconn.execute(f"DROP TABLE IF EXISTS {physical_name}")
-            wconn.close()
-    except Exception:
-        pass
-
-    if table.semantic_dataset_id:
-        ds = await session.get(Dataset, table.semantic_dataset_id)
-        if ds:
-            await session.delete(ds)
-
-    await session.delete(table)
-    await session.commit()
+    """Delete an API table, dropping its DuckDB table and cascading to its dataset, charts & dashboards."""
+    await delete_api_table_cascade(session=session, table_id=table_id)
 
 
 @router.post("/tables/{table_id}/refresh")

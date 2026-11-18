@@ -1,4 +1,5 @@
 """Database Connections API Endpoints."""
+import logging
 import uuid
 from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -9,8 +10,10 @@ from app.api.v1.deps import get_db_session, require_permission
 from app.connectors.duckdb_connector import DuckDBConnector
 from app.connectors.factory import get_connector
 from app.connectors.sql_connector import SQLAlchemyConnector
-from app.core.errors import ConflictError, NotFoundError, PermissionDeniedError
+from app.core.errors import AppException, ConflictError, NotFoundError, PermissionDeniedError
 from app.core.security import encrypt_secret
+
+logger = logging.getLogger(__name__)
 from app.db.models import DatabaseConnection, User
 from app.schemas.database import (
     AutoVisualizeRequest,
@@ -29,6 +32,7 @@ from app.schemas.database import (
     JoinSuggestionsResponse,
     RowsByKeyResponse,
 )
+from app.services.cascade_delete_service import delete_database_cascade
 from app.services.database_dashboard_builder import build_unified_database_dashboard
 from app.services.table_join_service import (
     build_join_sql,
@@ -259,21 +263,14 @@ async def delete_database(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(require_permission("databases:write")),
 ) -> dict:
-    """Delete a database connection (system connections cannot be deleted)."""
-    stmt = select(DatabaseConnection).where(
-        DatabaseConnection.id == id,
-        DatabaseConnection.deleted_at.is_(None),
-    )
-    result = await session.execute(stmt)
-    conn = result.scalar_one_or_none()
-    if not conn:
-        raise NotFoundError("Database connection not found.")
-    if conn.is_system:
-        raise PermissionDeniedError("System connections (e.g. built-in DuckDB 'Uploads') cannot be deleted.")
-
-    await session.delete(conn)
-    await session.commit()
-    return {"message": "Database connection deleted successfully."}
+    """Delete a database connection and cascade to all its datasets, charts & dashboards."""
+    res = await delete_database_cascade(session=session, database_id=id)
+    return {
+        "message": "Database connection deleted successfully.",
+        "deleted_datasets_count": res.get("deleted_datasets_count", 0),
+        "deleted_charts_count": res.get("deleted_charts_count", 0),
+        "deleted_dashboards_count": res.get("deleted_dashboards_count", 0),
+    }
 
 
 @router.get("/{id}/schemas")
@@ -540,12 +537,21 @@ async def get_database_rows_by_key(
         raise NotFoundError("Database connection not found.")
 
     connector = get_connector(conn)
-    res = get_rows_by_key(
-        connector=connector,
-        connection_id=conn.id,
-        table=table,
-        key_col=key_col,
-        key_value=key_value,
-    )
-    return RowsByKeyResponse(**res)
+    try:
+        res = get_rows_by_key(
+            connector=connector,
+            connection_id=conn.id,
+            table=table,
+            key_col=key_col,
+            key_value=key_value,
+        )
+        return RowsByKeyResponse(**res)
+    except Exception as e:
+        logger.error(
+            f"Error in rows-by-key for database {id}, table={table}, key={key_col}={key_value}: {e}",
+            exc_info=True,
+        )
+        if isinstance(e, AppException):
+            raise
+        raise AppException(f"Failed to lookup row by key: {str(e)}")
 

@@ -60,6 +60,7 @@ class ApiConnection(BaseModel):
     tables: Mapped[List["ApiDatasetTable"]] = relationship(
         "ApiDatasetTable",
         back_populates="connection",
+        cascade="all, delete-orphan",
         lazy="selectin",
     )
 

@@ -30,22 +30,26 @@ RESERVED_KEYWORDS = {
 }
 
 
-def quote_identifier(ident: str) -> str:
+def quote_identifier(ident: str, dialect: str = "postgres") -> str:
     """Safely quote a SQL identifier (column/table) only when needed."""
     cleaned = ident.strip()
     if not cleaned or cleaned == "*":
         return cleaned
     if cleaned.startswith('"') and cleaned.endswith('"'):
         return cleaned
+    if cleaned.startswith('[') and cleaned.endswith(']'):
+        return cleaned
     if "(" in cleaned or " " in cleaned and any(kw in cleaned.upper() for kw in ("AS ", "OVER ", "CASE ", "THEN ", "ELSE ", "END")):
         # It's an expression or complex clause, do not quote
         return cleaned
     if "." in cleaned:
         parts = cleaned.split(".")
-        return ".".join(quote_identifier(p) for p in parts)
+        return ".".join(quote_identifier(p, dialect=dialect) for p in parts)
     # If it's a standard alphanumeric identifier and not a reserved keyword, leave unquoted
     if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", cleaned) and cleaned.lower() not in RESERVED_KEYWORDS:
         return cleaned
+    if dialect.lower() in ("mssql", "tsql"):
+        return f"[{cleaned.replace(']', ']]')}]"
     safe = cleaned.replace('"', '""')
     return f'"{safe}"'
 
@@ -67,10 +71,18 @@ def build_chart_sql(
 
     # If dataset is virtual (saved SQL expression), wrap in subquery
     if dataset.is_virtual and dataset.sql_expression:
-        from_clause = f"({dataset.sql_expression}) AS virtual_source"
+        clean_expr = dataset.sql_expression.strip().rstrip(";")
+        if (dialect or "").lower() in ("mssql", "tsql") and "LIMIT" in clean_expr.upper():
+            try:
+                clean_expr = validate_and_format_sql(clean_expr, dialect="mssql", allow_dml=False)
+            except Exception:
+                pass
+        from_clause = f"({clean_expr}) AS virtual_source"
+    elif dataset.is_virtual and not dataset.sql_expression:
+        raise AppException("Virtual dataset has no SQL query defined.")
     else:
-        schema_prefix = f"{quote_identifier(dataset.schema_name)}." if dataset.schema_name else ""
-        from_clause = f"{schema_prefix}{quote_identifier(source_table)}"
+        schema_prefix = f"{quote_identifier(dataset.schema_name, dialect=dialect)}." if dataset.schema_name else ""
+        from_clause = f"{schema_prefix}{quote_identifier(source_table, dialect=dialect)}"
 
     select_items: List[str] = []
     group_by_items: List[str] = []
@@ -78,14 +90,19 @@ def build_chart_sql(
     # 1. Handle Time Dimension with grain
     if time_column and time_grain:
         norm_grain = TIME_GRAIN_MAP.get(time_grain.lower(), "day")
-        time_col_quoted = quote_identifier(time_column)
+        time_col_quoted = quote_identifier(time_column, dialect=dialect)
         clean_time_alias = re.sub(r"[^a-zA-Z0-9_]+", "_", str(time_column)).strip("_").lower() or "time_col"
         alias = f"{clean_time_alias}_{norm_grain}"
-        time_expr = f"date_trunc('{norm_grain}', {time_col_quoted}) AS {quote_identifier(alias)}"
-        select_items.append(time_expr)
-        group_by_items.append(quote_identifier(alias))
+        if dialect.lower() in ("mssql", "tsql"):
+            raw_time_expr = f"DATETRUNC({norm_grain}, {time_col_quoted})"
+            select_items.append(f"{raw_time_expr} AS {quote_identifier(alias, dialect=dialect)}")
+            group_by_items.append(raw_time_expr)
+        else:
+            time_expr = f"date_trunc('{norm_grain}', {time_col_quoted}) AS {quote_identifier(alias)}"
+            select_items.append(time_expr)
+            group_by_items.append(quote_identifier(alias, dialect=dialect))
     elif time_column:
-        time_col_quoted = quote_identifier(time_column)
+        time_col_quoted = quote_identifier(time_column, dialect=dialect)
         select_items.append(time_col_quoted)
         group_by_items.append(time_col_quoted)
 

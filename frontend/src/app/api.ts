@@ -817,6 +817,11 @@ export const api = {
     request<{ message: string }>(`/api/v1/datasets/${id}`, {
       method: "DELETE",
     }),
+  batchDeleteDatasets: (ids: string[]) =>
+    request<{ message: string; deleted_count: number }>("/api/v1/datasets/batch-delete", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
   addDatasetMetric: (datasetId: string, metric: any) =>
     request<DatasetMetric>(`/api/v1/datasets/${datasetId}/metrics`, {
       method: "POST",
@@ -824,16 +829,23 @@ export const api = {
     }),
 
   // SQL Lab
-  executeSql: (data: { database_id: string; sql: string; limit?: number }) =>
+  executeSql: (data: { database_id: string; sql: string; limit?: number; row_limit?: number }) =>
     request<SqlQueryResult>("/api/v1/sqllab/execute", {
       method: "POST",
-      body: JSON.stringify(data),
+      body: JSON.stringify({
+        ...data,
+        row_limit: data.row_limit || data.limit || 1000,
+      }),
     }),
   getSavedQueries: () => request<SavedQueryItem[]>("/api/v1/sqllab/saved-queries"),
   saveQuery: (data: { database_id: string; title: string; sql: string; description?: string }) =>
     request<SavedQueryItem>("/api/v1/sqllab/saved-queries", {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+  deleteSavedQuery: (id: string) =>
+    request<{ message: string }>(`/api/v1/sqllab/saved-queries/${id}`, {
+      method: "DELETE",
     }),
   getQueryHistory: () => request<QueryHistoryItem[]>("/api/v1/sqllab/history"),
 

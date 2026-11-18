@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Folder,
   X,
@@ -40,6 +41,7 @@ export function CollectionDetailsModal({
   onRefreshCollectionList,
 }: CollectionDetailsModalProps) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const [collection, setCollection] = useState<ApiCollectionWithTables | null>(null);
   const [loading, setLoading] = useState(false);
@@ -103,6 +105,9 @@ export function CollectionDetailsModal({
     if (!confirm("Are you sure you want to delete this API table and its DuckDB storage?")) return;
     try {
       await api.deleteApiTable(tableId);
+      queryClient.invalidateQueries({ queryKey: ["datasets"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboards"] });
+      queryClient.invalidateQueries({ queryKey: ["charts"] });
       await loadCollection();
       onRefreshCollectionList();
     } catch {

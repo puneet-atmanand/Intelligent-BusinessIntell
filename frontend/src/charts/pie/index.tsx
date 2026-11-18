@@ -46,33 +46,65 @@ const transformProps = (
     return { option: { title: { text: "No data available", left: "center", top: "center" } } };
   }
 
-  const dimCount = Math.max(
-    1,
-    Array.isArray(options.dimensions) && options.dimensions.length > 0
-      ? options.dimensions.length
-      : 1
-  );
-  const effectiveDimCount = Math.min(dimCount, Math.max(1, columns.length - 1));
+  // Find metric column index: last column or column matching options.metrics
+  let metricIdx = -1;
+  if (Array.isArray(options.metrics) && options.metrics.length > 0) {
+    const mNames = options.metrics.map((m: any) =>
+      (typeof m === "string" ? m : m.name || m.label || m.column || "").toLowerCase()
+    );
+    metricIdx = columns.findIndex((c) => mNames.includes(c.toLowerCase()));
+  }
 
-  const pieData = rows.map((r) => ({
-    name: r
-      .slice(0, effectiveDimCount)
-      .map((v) => (v === null ? "null" : String(v)))
-      .join(" / "),
-    value: Number(r[effectiveDimCount] ?? 0),
-  }));
+  // Fallback: look for a numeric column or default to last column
+  if (metricIdx === -1) {
+    for (let i = columns.length - 1; i >= 0; i--) {
+      const val = rows[0]?.[i];
+      if (typeof val === "number" || (!isNaN(Number(val)) && val !== null && val !== "" && typeof val !== "boolean")) {
+        metricIdx = i;
+        break;
+      }
+    }
+    if (metricIdx === -1) metricIdx = columns.length - 1;
+  }
+
+  // Dimension indices: all columns other than metricIdx
+  const dimIndices = columns.map((_, i) => i).filter((i) => i !== metricIdx);
+
+  const pieData = rows.map((r) => {
+    const sliceLabel = dimIndices
+      .map((i) => (r[i] === null || r[i] === undefined ? "null" : String(r[i])))
+      .join(" - ");
+    const rawVal = r[metricIdx];
+    const numVal = typeof rawVal === "number" ? rawVal : Number(rawVal);
+    return {
+      name: sliceLabel || "Slice",
+      value: isNaN(numVal) ? 0 : numVal,
+    };
+  });
 
   const isDonut = options.donut !== false;
-  const radius = isDonut ? ["40%", "70%"] : "70%";
+  const radius = isDonut ? ["38%", "68%"] : "68%";
 
   const option = {
     tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
-    legend: options.showLegend !== false ? { orient: "vertical", left: "left", top: "center" } : undefined,
+    legend:
+      options.showLegend !== false
+        ? {
+            type: "scroll",
+            orient: "vertical",
+            right: 16,
+            top: 24,
+            bottom: 24,
+            pageButtonPosition: "end",
+            textStyle: { fontSize: 11, color: "#475569" },
+          }
+        : undefined,
     series: [
       {
-        name: columns[effectiveDimCount] || "Metric",
+        name: columns[metricIdx] || "Metric",
         type: "pie",
         radius,
+        center: options.showLegend !== false ? ["40%", "50%"] : ["50%", "50%"],
         roseType: options.roseType ? "radius" : undefined,
         avoidLabelOverlap: true,
         itemStyle: {
@@ -80,7 +112,10 @@ const transformProps = (
           borderColor: "#fff",
           borderWidth: 2,
         },
-        label: { show: true, formatter: "{b}: {d}%" },
+        label: {
+          show: rows.length <= 15,
+          formatter: "{b}: {d}%",
+        },
         data: pieData,
       },
     ],
@@ -89,8 +124,17 @@ const transformProps = (
   return { option };
 };
 
-const Renderer: React.FC<PieChartProps> = ({ option, height = 380 }) => {
-  return <ReactECharts option={option} style={{ height, width: "100%" }} notMerge lazyUpdate />;
+const Renderer: React.FC<PieChartProps> = ({ option, height = 400 }) => {
+  return (
+    <div style={{ height, width: "100%", minHeight: 350 }}>
+      <ReactECharts
+        option={option}
+        style={{ height: "100%", width: "100%" }}
+        notMerge={true}
+        lazyUpdate={true}
+      />
+    </div>
+  );
 };
 
 export const pieChartPlugin: ChartPlugin<PieChartProps> = {

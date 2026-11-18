@@ -173,14 +173,21 @@ class AIOrchestrator:
                 )
                 db_conn = db_conn_res.scalar_one_or_none()
                 db_dialect = db_conn.dialect if db_conn else "SQL"
+                is_mssql = (db_dialect or "").lower() == "mssql"
+                active_schema = ds.schema_name or ("dbo" if is_mssql else "public")
                 col_list = ", ".join([f"{c.name} ({c.data_type})" for c in (ds.columns or [])])
+                mssql_hint = (
+                    "- SQL Server (MSSQL / T-SQL) Syntax: Use SELECT TOP (n) instead of LIMIT, square brackets [schema].[table] for quoting, LIKE instead of ILIKE, and DATETRUNC / DATEPART for dates.\n"
+                    if is_mssql else ""
+                )
                 context_hint = (
                     f"\n\n### ACTIVE DATASET CONTEXT (STRICT SCOPE):\n"
                     f"- The user is specifically exploring dataset: '{ds.name}'\n"
                     f"- Target Table: '{ds.table_name}'\n"
                     f"- Database ID: '{ds.database_id}' (Dialect: {db_dialect})\n"
-                    f"- Schema Name: '{ds.schema_name or 'public'}'\n"
+                    f"- Schema Name: '{active_schema}'\n"
                     f"- Columns: {col_list or 'Inspect with get_table_schema'}\n"
+                    f"{mssql_hint}"
                     f"- IMPORTANT: You MUST focus your analysis, queries, and answers ONLY on table '{ds.table_name}' unless the user explicitly asks about other tables."
                 )
 

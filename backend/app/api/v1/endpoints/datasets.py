@@ -24,6 +24,7 @@ from app.query.cache import QueryResultCache
 from app.query.chart_query_builder import quote_identifier
 from app.query.validator import validate_and_format_sql
 from app.schemas.dataset import (
+    BatchDeleteDatasetsRequest,
     BulkDatasetCreateRequest,
     BulkDatasetCreateResponse,
     BulkDatasetItemResult,
@@ -36,6 +37,7 @@ from app.schemas.dataset import (
     DatasetUpdate,
     RLSRuleBase,
 )
+from app.services.cascade_delete_service import delete_dataset_cascade
 from app.services.dataset_provisioner import provision_dataset_dashboard
 
 logger = logging.getLogger("askyourdata.datasets")
@@ -162,11 +164,27 @@ async def create_dataset(
         raise NotFoundError("Associated database connection not found.")
 
     dialect = (db_conn.dialect or "").lower()
-    default_schema = "public" if dialect in ("postgres", "postgresql") else ("main" if dialect in ("duckdb", "sqlite") else None)
+    is_mssql = dialect in ("mssql", "tsql")
+    default_schema = "public" if dialect in ("postgres", "postgresql") else ("dbo" if is_mssql else ("main" if dialect in ("duckdb", "sqlite") else None))
 
     effective_schema = payload.schema_name
     if not effective_schema or (effective_schema.lower() == "main" and dialect in ("postgres", "postgresql")):
         effective_schema = default_schema
+
+    raw_sql = (payload.sql_expression or getattr(payload, "sql_query", None) or "").strip()
+    is_virtual = payload.is_virtual or bool(raw_sql)
+    saved_sql = None
+
+    if is_virtual and raw_sql:
+        clean_sql = raw_sql.rstrip(";")
+        try:
+            saved_sql = validate_and_format_sql(
+                raw_sql=clean_sql,
+                dialect=dialect,
+                allow_dml=False,
+            )
+        except Exception:
+            saved_sql = clean_sql
 
     dataset = Dataset(
         name=payload.name,
@@ -174,15 +192,15 @@ async def create_dataset(
         database_id=payload.database_id,
         schema_name=effective_schema,
         table_name=payload.table_name,
-        is_virtual=payload.is_virtual,
-        sql_expression=payload.sql_expression,
+        is_virtual=is_virtual,
+        sql_expression=saved_sql,
         created_by_id=current_user.id,
     )
     session.add(dataset)
     await session.flush()
 
     # If physical table, auto-populate columns from source schema
-    if not payload.is_virtual and payload.table_name:
+    if not is_virtual and payload.table_name:
         try:
             connector = get_connector(db_conn)
             cols = connector.get_columns(
@@ -218,6 +236,67 @@ async def create_dataset(
             # Continue even if automatic inspection encounters an issue
             pass
 
+    # If virtual dataset, probe columns from SQL expression and populate DatasetColumn records
+    elif is_virtual and saved_sql:
+        try:
+            connector = get_connector(db_conn)
+            probe_sql = (
+                f"SELECT TOP 1 * FROM ({saved_sql}) AS _virtual_probe"
+                if is_mssql
+                else f"SELECT * FROM ({saved_sql}) AS _virtual_probe LIMIT 1"
+            )
+            try:
+                sample_res = connector.execute_query(probe_sql, limit=1)
+                col_names = sample_res.columns
+                col_types = sample_res.column_types
+            except Exception as e:
+                logger.warning(f"Could not probe columns with subquery wrapper ({e}), falling back to direct query")
+                sample_res = connector.execute_query(saved_sql, limit=1)
+                col_names = sample_res.columns
+                col_types = sample_res.column_types
+
+            for idx, c_name in enumerate(col_names):
+                if isinstance(col_types, dict):
+                    raw_type = col_types.get(c_name, "VARCHAR")
+                elif isinstance(col_types, list) and idx < len(col_types):
+                    raw_type = str(col_types[idx])
+                else:
+                    raw_type = "VARCHAR"
+                c_type = (raw_type or "VARCHAR").upper()
+                is_dt = "TIME" in c_type or "DATE" in c_type
+                is_id_like = (
+                    c_name.lower().endswith("_id")
+                    or c_name.lower().startswith("id_")
+                    or c_name.lower() in ("id", "uuid", "guid", "row_id", "sl_no", "index", "code", "key")
+                    or (c_name.lower().endswith("id") and len(c_name) <= 6)
+                )
+                is_numeric = any(t in c_type for t in ("INT", "DOUBLE", "FLOAT", "DECIMAL", "NUMERIC"))
+                is_dim = (not is_numeric) or is_id_like
+                col_record = DatasetColumn(
+                    dataset_id=dataset.id,
+                    name=c_name,
+                    verbose_name=c_name.replace("_", " ").title(),
+                    data_type=c_type,
+                    is_datetime=is_dt,
+                    is_dimension=is_dim,
+                    is_filterable=True,
+                    is_groupable=True,
+                    is_hidden_from_ai=False,
+                )
+                session.add(col_record)
+
+            # Auto-provision default row count metric
+            count_metric = DatasetMetric(
+                dataset_id=dataset.id,
+                name="count",
+                verbose_name="Count of Rows",
+                metric_type="count",
+                sql_expression="COUNT(*)",
+            )
+            session.add(count_metric)
+        except Exception as e:
+            logger.error(f"Failed to probe columns for virtual dataset '{dataset.name}': {e}", exc_info=True)
+
     await session.commit()
     await session.refresh(dataset)
 
@@ -251,12 +330,19 @@ async def create_dataset_from_join(
         raw_sql=payload.sql,
         dialect=dialect,
         allow_dml=False,
+        row_limit=None,
     )
 
     # 2. Probe column names and types by running a 1-row probe query
     connector = get_connector(db_conn)
-    probe_sql = f"SELECT * FROM ({safe_sql}) AS _join_probe LIMIT 1"
     try:
+        probe_sql = validate_and_format_sql(
+            raw_sql=f"SELECT * FROM ({safe_sql}) AS _join_probe",
+            dialect=dialect,
+            allow_dml=False,
+            row_limit=1,
+            force_limit=True,
+        )
         sample_result = connector.execute_query(probe_sql, limit=1)
         col_names = sample_result.columns
         col_types = sample_result.column_types
@@ -609,22 +695,45 @@ async def get_dataset(
     }
 
 
+@router.post("/batch-delete")
+async def batch_delete_datasets(
+    payload: BatchDeleteDatasetsRequest,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(require_permission("datasets:write")),
+) -> Dict[str, Any]:
+    """Batch delete multiple datasets and cascade to their charts and dashboards."""
+    total_deleted = 0
+    total_charts = 0
+    total_dashboards = 0
+    for ds_id in payload.ids:
+        try:
+            res = await delete_dataset_cascade(session=session, dataset_id=ds_id)
+            total_deleted += 1
+            total_charts += res.get("deleted_charts_count", 0)
+            total_dashboards += res.get("deleted_dashboards_count", 0)
+        except Exception as e:
+            logger.warning(f"Failed to cascade delete dataset {ds_id}: {e}")
+    return {
+        "message": f"{total_deleted} dataset(s) deleted successfully.",
+        "deleted_count": total_deleted,
+        "deleted_charts_count": total_charts,
+        "deleted_dashboards_count": total_dashboards,
+    }
+
+
 @router.delete("/{id}")
 async def delete_dataset(
     id: uuid.UUID,
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(require_permission("datasets:write")),
-) -> Dict[str, str]:
-    """Delete a semantic dataset."""
-    stmt = select(Dataset).where(Dataset.id == id, Dataset.deleted_at.is_(None))
-    result = await session.execute(stmt)
-    dataset = result.scalar_one_or_none()
-    if not dataset:
-        raise NotFoundError("Dataset not found.")
-
-    await session.delete(dataset)
-    await session.commit()
-    return {"message": "Dataset deleted successfully."}
+) -> Dict[str, Any]:
+    """Delete a semantic dataset and cascade to all its charts and dashboards."""
+    res = await delete_dataset_cascade(session=session, dataset_id=id)
+    return {
+        "message": "Dataset deleted successfully.",
+        "deleted_charts_count": res.get("deleted_charts_count", 0),
+        "deleted_dashboards_count": res.get("deleted_dashboards_count", 0),
+    }
 
 
 @router.post("/{id}/metrics", status_code=status.HTTP_201_CREATED)
@@ -733,13 +842,24 @@ async def get_dataset_profile(
 
     connector = get_connector(db_conn)
     dialect = (db_conn.dialect or "").lower()
+    is_mssql = dialect in ("mssql", "tsql")
 
     if dataset.is_virtual and dataset.sql_expression:
-        from_clause = f"({dataset.sql_expression}) AS virtual_source"
+        clean_expr = dataset.sql_expression.strip().rstrip(";")
+        if is_mssql and "LIMIT" in clean_expr.upper():
+            try:
+                clean_expr = validate_and_format_sql(clean_expr, dialect="mssql", allow_dml=False)
+            except Exception:
+                pass
+        from_clause = f"({clean_expr}) AS virtual_source"
     else:
-        schema = dataset.schema_name or ("public" if dialect in ("postgres", "postgresql") else None)
-        schema_prefix = f"{quote_identifier(schema)}." if schema else ""
-        from_clause = f"{schema_prefix}{quote_identifier(dataset.table_name or 'source')}"
+        schema = dataset.schema_name or ("public" if dialect in ("postgres", "postgresql") else ("dbo" if is_mssql else None))
+        if is_mssql:
+            schema_prefix = f"[{schema}]." if schema else ""
+            from_clause = f"{schema_prefix}[{dataset.table_name or 'source'}]"
+        else:
+            schema_prefix = f"{quote_identifier(schema)}." if schema else ""
+            from_clause = f"{schema_prefix}{quote_identifier(dataset.table_name or 'source')}"
 
     columns = dataset.columns or []
     if not columns:
@@ -813,14 +933,23 @@ async def get_dataset_profile(
         # Top 5 values for low-cardinality columns
         top_values = None
         if 0 < distinct_count <= 50 and total_rows > 0:
-            safe_col = quote_identifier(c.name)
-            top_sql = (
-                f"SELECT {safe_col} AS val, COUNT(*) AS cnt "
-                f"FROM {from_clause} "
-                f"WHERE {safe_col} IS NOT NULL "
-                f"GROUP BY {safe_col} "
-                f"ORDER BY cnt DESC LIMIT 5"
-            )
+            safe_col = f"[{c.name}]" if is_mssql else quote_identifier(c.name)
+            if is_mssql:
+                top_sql = (
+                    f"SELECT TOP 5 {safe_col} AS val, COUNT(*) AS cnt "
+                    f"FROM {from_clause} "
+                    f"WHERE {safe_col} IS NOT NULL "
+                    f"GROUP BY {safe_col} "
+                    f"ORDER BY cnt DESC"
+                )
+            else:
+                top_sql = (
+                    f"SELECT {safe_col} AS val, COUNT(*) AS cnt "
+                    f"FROM {from_clause} "
+                    f"WHERE {safe_col} IS NOT NULL "
+                    f"GROUP BY {safe_col} "
+                    f"ORDER BY cnt DESC LIMIT 5"
+                )
             try:
                 top_res = connector.execute_query(top_sql, limit=5)
                 top_values = [
@@ -884,13 +1013,24 @@ async def get_dataset_rows(
 
     connector = get_connector(db_conn)
     dialect = (db_conn.dialect or "").lower()
+    is_mssql = dialect in ("mssql", "tsql")
 
     if dataset.is_virtual and dataset.sql_expression:
-        from_clause = f"({dataset.sql_expression}) AS virtual_source"
+        clean_expr = dataset.sql_expression.strip().rstrip(";")
+        if is_mssql and "LIMIT" in clean_expr.upper():
+            try:
+                clean_expr = validate_and_format_sql(clean_expr, dialect="mssql", allow_dml=False)
+            except Exception:
+                pass
+        from_clause = f"({clean_expr}) AS virtual_source"
     else:
-        schema = dataset.schema_name or ("public" if dialect in ("postgres", "postgresql") else None)
-        schema_prefix = f"{quote_identifier(schema)}." if schema else ""
-        from_clause = f"{schema_prefix}{quote_identifier(dataset.table_name or 'source')}"
+        schema = dataset.schema_name or ("public" if dialect in ("postgres", "postgresql") else ("dbo" if is_mssql else None))
+        if is_mssql:
+            schema_prefix = f"[{schema}]." if schema else ""
+            from_clause = f"{schema_prefix}[{dataset.table_name or 'source'}]"
+        else:
+            schema_prefix = f"{quote_identifier(schema)}." if schema else ""
+            from_clause = f"{schema_prefix}{quote_identifier(dataset.table_name or 'source')}"
 
     # 1. Total count query
     count_sql = f"SELECT COUNT(*) AS total FROM {from_clause}"
@@ -907,13 +1047,20 @@ async def get_dataset_rows(
         order_clause = f" ORDER BY {quote_identifier(order_by)} {direction}"
 
     # 3. Paginated query
-    query_sql = f"SELECT * FROM {from_clause}{order_clause} LIMIT {limit} OFFSET {offset}"
-    safe_sql = validate_and_format_sql(
-        raw_sql=query_sql,
-        dialect=dialect,
-        allow_dml=False,
-        row_limit=max(limit + offset, 10000),
-    )
+    if is_mssql:
+        if not order_clause:
+            first_col = (dataset.columns[0].name) if dataset.columns else None
+            order_clause = f" ORDER BY [{first_col}] ASC" if first_col else " ORDER BY (SELECT NULL)"
+        query_sql = f"SELECT * FROM {from_clause}{order_clause} OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY"
+        safe_sql = query_sql
+    else:
+        query_sql = f"SELECT * FROM {from_clause}{order_clause} LIMIT {limit} OFFSET {offset}"
+        safe_sql = validate_and_format_sql(
+            raw_sql=query_sql,
+            dialect=dialect,
+            allow_dml=False,
+            row_limit=max(limit + offset, 10000),
+        )
 
     query_res = connector.execute_query(safe_sql, limit=limit)
 

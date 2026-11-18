@@ -718,6 +718,8 @@ async def build_unified_database_dashboard(
 
             # Rule 3: Date / Timestamp
             if is_dt:
+                is_pure_time = "TIME" in c_type and not any(t in c_type for t in ("DATE", "DATETIME", "TIMESTAMP"))
+                t_grain = "hour" if is_pure_time else "month"
                 table_chart_specs.append((
                     {
                         "title": f"{t_name} Trend Over {col_label}",
@@ -726,7 +728,7 @@ async def build_unified_database_dashboard(
                         "params": {
                             "dimensions": [],
                             "time_column": c.name,
-                            "time_grain": "month",
+                            "time_grain": t_grain,
                             "metrics": [count_metric],
                             "row_limit": 200,
                             "options": {"smooth": True},
@@ -752,10 +754,18 @@ async def build_unified_database_dashboard(
                         b_end = f_min + b_idx * step
                         case_whens.append(f"WHEN {b_idx} THEN '{b_start:.1f}-{b_end:.1f}'")
 
-                    hist_dim = (
-                        f"CASE WIDTH_BUCKET({safe_col}, {f_min}, {f_max + 0.0001}, 10) "
-                        f"{' '.join(case_whens)} ELSE 'Other' END"
-                    )
+                    if dialect in ("mssql", "tsql"):
+                        hist_dim = (
+                            f"CASE WHEN {safe_col} >= {f_max} THEN '{f_min + 9 * step:.1f}-{f_max:.1f}' "
+                            f"WHEN {safe_col} < {f_min} THEN 'Other' "
+                            f"ELSE CASE CAST(FLOOR(({safe_col} - {f_min}) / {step}) + 1 AS INT) "
+                            f"{' '.join(case_whens)} ELSE 'Other' END END"
+                        )
+                    else:
+                        hist_dim = (
+                            f"CASE WIDTH_BUCKET({safe_col}, {f_min}, {f_max + 0.0001}, 10) "
+                            f"{' '.join(case_whens)} ELSE 'Other' END"
+                        )
                     table_chart_specs.append((
                         {
                             "title": f"{col_label} Distribution (Histogram)",

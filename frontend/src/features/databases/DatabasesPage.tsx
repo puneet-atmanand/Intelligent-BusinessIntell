@@ -365,6 +365,9 @@ export const DatabasesPage: React.FC = () => {
     mutationFn: (id: string) => api.deleteDatabase(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["databases"] });
+      queryClient.invalidateQueries({ queryKey: ["datasets"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboards"] });
+      queryClient.invalidateQueries({ queryKey: ["charts"] });
     },
   });
 

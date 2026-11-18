@@ -1,7 +1,7 @@
 """Dataset Schemas."""
 import uuid
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class DatasetColumnBase(BaseModel):
@@ -61,6 +61,15 @@ class DatasetCreate(BaseModel):
     table_name: Optional[str] = None
     is_virtual: bool = False
     sql_expression: Optional[str] = None
+    sql_query: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_sql_query_alias(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("sql_expression") and data.get("sql_query"):
+                data["sql_expression"] = data["sql_query"]
+        return data
 
 
 class DatasetUpdate(BaseModel):
@@ -149,4 +158,9 @@ class DatasetFromJoinResponse(BaseModel):
     dashboard_slug: Optional[str] = None
     dashboard_id: Optional[uuid.UUID] = None
     message: str = "Dataset created successfully from join query."
+
+
+class BatchDeleteDatasetsRequest(BaseModel):
+    ids: List[uuid.UUID]
+
 

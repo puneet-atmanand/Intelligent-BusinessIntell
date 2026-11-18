@@ -25,10 +25,11 @@ Its integrated AI Assistant empowers conversational data analysis while guarante
 | Layer | Technology |
 |---|---|
 | **Backend API** | Python 3.11+, FastAPI, Pydantic v2 |
+| **Supported Analytical Databases** | Microsoft SQL Server (MSSQL), PostgreSQL 16, SQLite, MySQL, DuckDB |
 | **Metadata Database** | SQLite (Instant Local Dev) / PostgreSQL 16 (Production) |
 | **ORM & Migrations** | SQLAlchemy 2.0 Async, Alembic |
 | **Columnar Storage & Engine** | Embedded DuckDB (Multi-threaded In-Process OLAP) |
-| **SQL Parsing & AST Security** | SQLGlot AST Engine |
+| **SQL Parsing & AST Security** | SQLGlot AST Engine (Cross-dialect transpilation & guardrails) |
 | **AI LLM Providers** | Multi-Provider Engine: Groq, Google Gemini, OpenAI, Anthropic Claude, Ollama |
 | **API Connect Engine** | Async HTTPX with SSRF Guard, OpenAPI 3.0/Swagger 2.0 Parser (PyYAML/JSON) |
 | **Frontend Framework** | React 18, TypeScript (Strict Mode), Vite |
@@ -44,52 +45,65 @@ Its integrated AI Assistant empowers conversational data analysis while guarante
 ## ✨ Key Features & Capabilities
 
 ### 1. Database Connectivity & Schema Browser
-- **Multi-Engine Support:** Connect PostgreSQL, SQLite, MySQL, and DuckDB analytical databases.
-- **Cross-Schema Browser:** Inspect databases across multiple schemas simultaneously (e.g., `public`, `academics`, `exams`, `finance`).
+- **Multi-Engine Support:** Connect Microsoft SQL Server (MSSQL via `pyodbc`), PostgreSQL (via `psycopg2` / `asyncpg`), SQLite (via `aiosqlite`), MySQL, and DuckDB analytical databases.
+- **Cross-Schema Browser:** Inspect databases across multiple schemas simultaneously (e.g., `dbo`, `attendance`, `payroll`, `performance`, `hr`, `public`).
 - **Auto-Visualization Engine:**
   - **Separate dashboard per table + one unified dashboard (Recommended):** Generates dedicated dashboards for each table plus an executive, consolidated database dashboard.
   - **Unified dashboard only:** Consolidates all tables into a unified overview dashboard organized by section dividers and KPI cards.
   - **Separate dashboards per table only:** Generates standalone table dashboards.
-- **Deep-Linking & Direct URL Slugs:** View dashboards directly by slug or UUID (e.g., `/dashboards/student-db-full-dashboard`).
+- **Cascade Deletion Service:** Deleting a database safely cascades and cleans up all related semantic datasets, charts, dashboards, and uploaded tables with zero orphaned records.
+- **Deep-Linking & Direct URL Slugs:** View dashboards directly by slug or UUID (e.g., `/dashboards/employees-db-full-dashboard`).
 
 ### 2. Table Join Assistant & Visual Relationship Engine
-- **Automated Foreign Key & Heuristic Discovery:** Detects implicit relationships and cross-table joins automatically.
-- **Visual Join Assistant Modal:** Select source and target tables across any schema, configure join types (`INNER`, `LEFT`, `RIGHT`, `FULL`), and map join keys.
-- **Live SQL Generation & Data Preview:** Inspect joined query results before saving.
-- **Reusable Virtual Datasets:** Saves joined models as semantic virtual datasets without altering raw source tables.
+- **Automated Foreign Key & Heuristic Discovery:** Detects implicit relationships, primary keys, foreign keys, and candidate join keys across different schemas.
+- **Visual Join Assistant Modal:** Select source and target tables across any schema, configure join types (`INNER`, `LEFT`, `RIGHT`, `FULL OUTER`, `CROSS`, `LEFT ANTI`, `RIGHT ANTI`), and map join keys.
+- **Live Collision-Safe SQL Generation:** Automatically qualifies and aliases overlapping column names (e.g., `t1_id`, `t2_id`) with real-time query execution preview.
+- **Direct "Open Join in SQL Lab":** Loads the join query directly into Monaco SQL Lab with the correct database connection, editor query, and tab title.
+- **"Save as Dataset":** Converts the join into a reusable semantic virtual dataset with dialect-aware 1-row column probing (supports MSSQL `TOP 1`, Postgres `LIMIT 1`, DuckDB) and auto-provisioned dashboards.
+- **"Create Chart":** Seamless transition from join directly into Chart Builder with all joined dimensions and measures ready for immediate visualization.
 
-### 3. API Connect & REST Data Ingestion
+### 3. Semantic Datasets Layer & Batch Operations
+- **Physical vs. Virtual Datasets:**
+  - **Physical Datasets:** 1-to-1 reflection of real database tables or views (e.g., `payroll.salaries`).
+  - **Virtual Datasets:** Reusable semantic models built from custom SQL queries or multi-table joins without requiring DDL or DBA privileges in the database.
+- **Multi-Select & Bulk Deletion:** Master select-all checkbox and individual row checkboxes with a dedicated bulk action pill (`Delete Selected (N)` / `Delete All (N)`) and cascade deletion of all associated charts and dashboards.
+- **Calculated Metrics & Column Profiling:** Define custom SQL aggregations (`SUM`, `AVG`, `COUNT DISTINCT`), format masks, and view null counts, distinct values, and data type distributions.
+
+### 4. API Connect & REST Data Ingestion
 - **OpenAPI / Swagger Importer:** Import APIs via URL or raw specification (JSON or YAML) with full endpoint and parameter discovery.
 - **SSRF Guard:** Comprehensive security client guarding against internal network probes, AWS/GCP metadata endpoints, and unauthorized localhost targets.
 - **Smart Multi-Strategy Pagination:** Built-in support for page-based, limit-offset, cursor-based, and Link header pagination.
 - **Data Normalization & DuckDB Ingestion:** Automatically flattens complex nested JSON payloads into structured columnar DuckDB tables.
 - **Sync Engine:** On-demand and scheduled data synchronization with status tracking.
 
-### 4. File Uploads & Columnar Ingestion
+### 5. File Uploads & Columnar Ingestion
 - **Multi-Format Support:** Drag-and-drop upload of CSV, TSV, Excel (`.xlsx`), Parquet, and JSON/JSONL up to 200MB.
 - **Automatic Schema Inference:** Detects date formats, numeric columns, and categorical dimensions upon upload.
 - **Instant "Build Chart" Flow:** Direct transition from upload success notification straight into the chart builder.
 - **Ingested Table Management:** Inspect total rows, format, upload date, with one-click SQL querying and table deletion.
 
-### 5. Multi-Axis & Flexible Chart Explorer
+### 6. Multi-Axis & Flexible Chart Explorer
 - **Multi-Metric Axis Builder:** Select one or multiple dimensions and metrics on both the X and Y axes.
 - **One-Click Field Removal:** Dedicated delete pills (`x`) on every selected dimension/metric for rapid reconfiguration.
-- **DuckDB Temporal Column Validation:** Type-safe handling of timestamps and dates across aggregations.
+- **Temporal Column Isolation:** Non-temporal and categorical charts (such as Pie / Donut charts) cleanly query dimensions and metrics without injecting non-temporal datetruncs, preventing `NaN` data parsing errors.
+- **Scrollable ECharts Legends:** Robust vertical scrolling legends (`type: "scroll"`) prevent legend overflow when datasets contain high-cardinality categories.
 - **Comprehensive Visualizations:** Big Number (KPI), Bar, Line, Area, Pie/Donut, Scatter, Heatmap, and Summary Tables with Apache ECharts.
 
-### 6. Drag-and-Drop Interactive Dashboards
+### 7. Drag-and-Drop Interactive Dashboards
 - **Grid Layout Canvas:** Resize, rearrange, and place charts dynamically with `react-grid-layout`.
 - **Global Native Filters:** Cross-filter multiple charts across common dimensions.
 - **Configurable Auto-Refresh:** Set interval timers (10s, 30s, 1m, 5m) for real-time monitoring.
 - **Responsive Layout:** Optimized for desktop analytics workspaces and executive presentations.
 
-### 7. Monaco-Powered SQL Lab
-- **Monaco Code Editor:** Syntax highlighting, query formatting, auto-completion, and multi-query execution.
-- **Dialect Transpilation:** Transpile queries safely across SQL dialects using SQLGlot.
-- **Results Explorer:** Tabular results with row counters, data type badges, execution duration, and CSV export.
-- **Query History & Saved Queries:** Track past executions and bookmark frequent analytical queries.
+### 8. Monaco-Powered SQL Lab
+- **Monaco Code Editor:** Syntax highlighting, query formatting, auto-completion, and multi-tab query management.
+- **Keyboard Execution:** `Ctrl+Enter` and `Cmd+Enter` shortcuts executed seamlessly from both the editor and workspace window.
+- **Dynamic Row Limit Enforcement:** Synchronized row limit dropdown (`100`, `1,000`, `5,000`, `10,000`) that enforces limits across editor text, backend validator AST, and database execution (supporting MSSQL `TOP` and Postgres/DuckDB `LIMIT`).
+- **Saved Queries Management:** Prominent **Saved Queries ({count})** button in the top toolbar with search filtering, one-click "Load in Tab", "+ Tab", and query deletion.
+- **Virtual Dataset Creation & Direct Explore:** Convert any executed SQL query into a virtual dataset or explore it directly in Chart Builder.
+- **Results Explorer:** Tabular results with row counters, data type badges, execution duration, and CSV/TSV export.
 
-### 8. Grounded AI Assistant (Multi-Provider)
+### 9. Grounded AI Assistant (Multi-Provider)
 - **Seamless Provider Switching:** Configure your LLM via `.env` without code changes:
   - **Groq:** Ultra-fast inference with `qwen/qwen3.8-27b` or `llama-3.3-70b-versatile`.
   - **Google Gemini:** Native tool calling with `gemini-flash-lite-latest` or `gemini-1.5-flash`.
@@ -100,7 +114,7 @@ Its integrated AI Assistant empowers conversational data analysis while guarante
 - **Zero-Hallucination Grounding:** Numbers generated by the AI are verified against executed query rows before response display.
 - **Saveable Artifacts:** Save AI-generated queries directly into SQL Lab or save AI-recommended charts into your dashboards.
 
-### 9. Enterprise-Grade Security
+### 10. Enterprise-Grade Security
 - **JWT Authentication:** Secure HTTP-only cookies preventing XSS token theft.
 - **Fernet Secret Encryption:** Encrypts external database passwords and credentials at rest using AES-128-CBC.
 - **AST SQL Guardrails:** Blocks dangerous operations (`DROP`, `DELETE`, `ALTER`, `TRUNCATE`), multi-statement injections, and non-whitelisted SQL functions.

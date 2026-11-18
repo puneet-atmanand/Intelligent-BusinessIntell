@@ -277,10 +277,13 @@ export const ChartsPage: React.FC = () => {
         }
       }
 
-      // Enforce valid time column: only pass if valid in dataset
-      const safeTimeCol = validTimeColumns.some(
+      // For temporal charts (line, area, trendline), use timeColumn.
+      // For categorical charts (pie, bar, table, etc.), only use timeColumn if user did NOT select any other dimension.
+      const isTemporalViz = ["line", "area", "big_number_trendline"].includes(selectedVizType);
+      const hasValidTimeCol = validTimeColumns.some(
         (c) => (c.column_name || c.name) === timeColumn
-      )
+      );
+      const safeTimeCol = hasValidTimeCol && (isTemporalViz || dims.length === 0)
         ? timeColumn
         : undefined;
 
@@ -396,6 +399,7 @@ export const ChartsPage: React.FC = () => {
     mutationFn: (id: string) => api.deleteChart(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["charts"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboards"] });
     },
   });
 

@@ -46,6 +46,7 @@ class SQLAlchemyConnector(BaseConnector):
             available_schemas = []
 
         is_postgres = "postgres" in (self.uri or "").lower()
+        is_mssql = "mssql" in (self.uri or "").lower()
         clean_schema = schema_name.strip() if schema_name else None
 
         if clean_schema:
@@ -58,9 +59,12 @@ class SQLAlchemyConnector(BaseConnector):
 
             # If schema_name is "main" (the frontend's default state):
             # For Postgres, "main" does not exist, so map to "public"
+            # For MSSQL, map "main" to "dbo"
             if clean_schema.lower() == "main":
                 if is_postgres:
                     return "public" if ("public" in available_schemas or not available_schemas) else (available_schemas[0] if available_schemas else "public")
+                elif is_mssql:
+                    return "dbo" if ("dbo" in available_schemas or not available_schemas) else (available_schemas[0] if available_schemas else "dbo")
                 elif "default" in available_schemas:
                     return "default"
                 elif "dbo" in available_schemas:
@@ -72,15 +76,38 @@ class SQLAlchemyConnector(BaseConnector):
             # If schema was specified but not found in available_schemas:
             if is_postgres and "public" in available_schemas:
                 return "public"
+            if is_mssql and "dbo" in available_schemas:
+                return "dbo"
             return clean_schema
 
         # If schema_name is None or empty:
         if is_postgres:
             return "public" if ("public" in available_schemas or not available_schemas) else available_schemas[0]
+        if is_mssql:
+            return "dbo" if ("dbo" in available_schemas or not available_schemas) else (available_schemas[0] if available_schemas else "dbo")
         return None
 
     def get_schemas(self) -> List[str]:
         try:
+            is_mssql = "mssql" in (self.uri or "").lower()
+            if is_mssql:
+                engine = self._get_engine()
+                with engine.connect() as conn:
+                    res = conn.execute(text("""
+                        SELECT DISTINCT s.name AS schema_name
+                        FROM sys.schemas s
+                        JOIN sys.objects o ON s.schema_id = o.schema_id
+                        WHERE o.type IN ('U', 'V')
+                          AND s.name NOT IN (
+                            'sys', 'INFORMATION_SCHEMA', 'guest', 'db_owner',
+                            'db_accessadmin', 'db_securityadmin', 'db_ddladmin',
+                            'db_backupoperator', 'db_datareader', 'db_datawriter',
+                            'db_denydatareader', 'db_denydatawriter'
+                          )
+                        ORDER BY s.name
+                    """))
+                    return [r[0] for r in res.fetchall()]
+
             engine = self._get_engine()
             inspector = inspect(engine)
             schemas = inspector.get_schema_names()
@@ -175,6 +202,68 @@ class SQLAlchemyConnector(BaseConnector):
                     return [{"name": s, "tables": schema_map[s]} for s in schemas]
                 except Exception:
                     # Fallback to generic inspector if pg_class query fails
+                    pass
+
+            is_mssql = "mssql" in (self.uri or "").lower()
+            if is_mssql:
+                try:
+                    stmt = text("""
+                        SELECT 
+                            s.name AS schema_name,
+                            t.name AS table_name,
+                            'table' AS table_type,
+                            ISNULL(SUM(p.row_count), 0) AS row_count_estimate
+                        FROM sys.tables t
+                        JOIN sys.schemas s ON t.schema_id = s.schema_id
+                        LEFT JOIN sys.dm_db_partition_stats p 
+                            ON t.object_id = p.object_id AND p.index_id IN (0, 1)
+                        WHERE s.name NOT IN (
+                            'sys', 'INFORMATION_SCHEMA', 'guest', 'db_owner',
+                            'db_accessadmin', 'db_securityadmin', 'db_ddladmin',
+                            'db_backupoperator', 'db_datareader', 'db_datawriter',
+                            'db_denydatareader', 'db_denydatawriter'
+                        )
+                        GROUP BY s.name, t.name
+                        UNION ALL
+                        SELECT 
+                            s.name AS schema_name,
+                            v.name AS table_name,
+                            'view' AS table_type,
+                            0 AS row_count_estimate
+                        FROM sys.views v
+                        JOIN sys.schemas s ON v.schema_id = s.schema_id
+                        WHERE s.name NOT IN (
+                            'sys', 'INFORMATION_SCHEMA', 'guest', 'db_owner',
+                            'db_accessadmin', 'db_securityadmin', 'db_ddladmin',
+                            'db_backupoperator', 'db_datareader', 'db_datawriter',
+                            'db_denydatareader', 'db_denydatawriter'
+                        )
+                        ORDER BY schema_name, table_name
+                    """)
+                    with engine.connect() as conn:
+                        res = conn.execute(stmt)
+                        rows = res.fetchall()
+
+                    schema_map: dict[str, list[dict[str, Any]]] = {}
+                    for r in rows:
+                        s_name = r[0]
+                        t_name = r[1]
+                        t_type = r[2]
+                        r_est = int(r[3]) if r[3] is not None else 0
+                        if s_name not in schema_map:
+                            schema_map[s_name] = []
+                        schema_map[s_name].append({
+                            "name": t_name,
+                            "type": t_type,
+                            "row_count_estimate": r_est,
+                        })
+
+                    return [
+                        {"name": s, "tables": schema_map[s]}
+                        for s in sorted(schema_map.keys())
+                        if len(schema_map[s]) > 0
+                    ]
+                except Exception:
                     pass
 
             # Generic fallback for MySQL, SQLite, MSSQL, or if PG query fails

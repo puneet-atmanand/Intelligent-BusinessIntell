@@ -12,6 +12,7 @@ from app.connectors.duckdb_connector import duckdb_write_lock
 from app.core.config import settings
 from app.core.errors import AppException, NotFoundError
 from app.db.models import UploadedFile, User
+from app.services.cascade_delete_service import delete_upload_cascade
 from app.uploads.duckdb_loader import load_file_into_duckdb_and_register_dataset
 from app.uploads.parser import parse_file_preview, sanitize_column_name
 
@@ -122,24 +123,11 @@ async def delete_upload(
     id: uuid.UUID,
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(require_permission("uploads:use")),
-) -> Dict[str, str]:
-    """Delete uploaded file record and drop table in DuckDB."""
-    stmt = select(UploadedFile).where(UploadedFile.id == id, UploadedFile.deleted_at.is_(None))
-    result = await session.execute(stmt)
-    file_record = result.scalar_one_or_none()
-    if not file_record:
-        raise NotFoundError("Upload record not found.")
-
-    # Drop table in DuckDB
-    table_name = file_record.target_table_name
-    db_path = settings.DUCKDB_DATABASE_PATH
-    with duckdb_write_lock:
-        conn = duckdb.connect(db_path, read_only=False)
-        try:
-            conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-        finally:
-            conn.close()
-
-    await session.delete(file_record)
-    await session.commit()
-    return {"message": f"File and table '{table_name}' deleted successfully."}
+) -> Dict[str, Any]:
+    """Delete uploaded file record, drop DuckDB table, and cascade delete its dataset, charts & dashboards."""
+    res = await delete_upload_cascade(session=session, upload_id=id)
+    return {
+        "message": f"File and table '{res.get('table_name')}' deleted successfully.",
+        "deleted_charts_count": res.get("deleted_charts_count", 0),
+        "deleted_dashboards_count": res.get("deleted_dashboards_count", 0),
+    }

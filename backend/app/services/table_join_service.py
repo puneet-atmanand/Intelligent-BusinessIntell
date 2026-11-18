@@ -48,8 +48,10 @@ def _find_table_info(tables_list: List[Dict[str, Any]], table_ident: str) -> Opt
 
 def _quote_ident(ident: str, dialect: str = "postgresql") -> str:
     """Safely quote an SQL identifier according to the database dialect."""
-    clean = ident.replace('"', "").replace("`", "").replace("'", "").strip()
+    clean = ident.replace('"', "").replace("`", "").replace("'", "").replace("[", "").replace("]", "").strip()
     d = (dialect or "postgresql").lower()
+    if d in ("mssql", "tsql"):
+        return f"[{clean}]"
     if d in ("mysql", "mariadb"):
         return f"`{clean}`"
     return f'"{clean}"'
@@ -592,6 +594,26 @@ def get_rows_by_key(
     if len(col_names_raw) != len(val_list):
         raise ValidationError("Number of key columns does not match number of key values provided.")
 
+    engine = None
+    if isinstance(connector, SQLAlchemyConnector):
+        engine = connector._get_engine()
+    elif hasattr(connector, "_get_engine"):
+        engine = connector._get_engine()
+
+    if not engine:
+        raise AppException("Could not acquire database engine for connection.")
+
+    is_mssql = False
+    if hasattr(engine, "dialect") and engine.dialect.name == "mssql":
+        is_mssql = True
+    elif isinstance(connector, SQLAlchemyConnector) and "mssql" in (connector.uri or "").lower():
+        is_mssql = True
+
+    def _q(ident: str) -> str:
+        if is_mssql:
+            return f"[{ident.replace(']', ']]')}]"
+        return f'"{ident.replace(chr(34), chr(34)+chr(34))}"'
+
     real_key_cols: List[str] = []
     param_dict: Dict[str, Any] = {}
     where_parts: List[str] = []
@@ -603,22 +625,16 @@ def get_rows_by_key(
         real_key_cols.append(real_c)
         param_name = f"p_key_{idx}"
         param_dict[param_name] = val_list[idx]
-        where_parts.append(f'"{real_c}" = :{param_name}')
+        where_parts.append(f"{_q(real_c)} = :{param_name}")
 
     where_sql = " AND ".join(where_parts)
-    target_table_sql = f'"{schema}"."{table_name}"'
-
-    engine = None
-    if isinstance(connector, SQLAlchemyConnector):
-        engine = connector._get_engine()
-    elif hasattr(connector, "_get_engine"):
-        engine = connector._get_engine()
-
-    if not engine:
-        raise AppException("Could not acquire database engine for connection.")
+    target_table_sql = f"{_q(schema)}.{_q(table_name)}"
 
     # 1. Fetch target row
-    query_target = text(f"SELECT * FROM {target_table_sql} WHERE {where_sql} LIMIT 1")
+    if is_mssql:
+        query_target = text(f"SELECT TOP 1 * FROM {target_table_sql} WHERE {where_sql}")
+    else:
+        query_target = text(f"SELECT * FROM {target_table_sql} WHERE {where_sql} LIMIT 1")
     row_dict: Optional[Dict[str, Any]] = None
     with engine.connect() as db_conn:
         res = db_conn.execute(query_target, param_dict)
@@ -660,10 +676,13 @@ def get_rows_by_key(
                 for p_idx, (fc, rc) in enumerate(zip(fk_cols, ref_cols)):
                     p_name = f"pfk_{p_idx}"
                     parent_params[p_name] = row_dict[fc]
-                    parent_where_parts.append(f'"{rc}" = :{p_name}')
+                    parent_where_parts.append(f"{_q(rc)} = :{p_name}")
 
                 parent_where = " AND ".join(parent_where_parts)
-                parent_q = text(f'SELECT * FROM "{ref_schema}"."{ref_table}" WHERE {parent_where} LIMIT 1')
+                if is_mssql:
+                    parent_q = text(f"SELECT TOP 1 * FROM {_q(ref_schema)}.{_q(ref_table)} WHERE {parent_where}")
+                else:
+                    parent_q = text(f'SELECT * FROM "{ref_schema}"."{ref_table}" WHERE {parent_where} LIMIT 1')
                 p_res = db_conn.execute(parent_q, parent_params).mappings().first()
                 p_row_dict = None
                 if p_res:
@@ -704,15 +723,22 @@ def get_rows_by_key(
                         for c_idx, (fc, rc) in enumerate(zip(fk_cols, ref_cols)):
                             c_pname = f"cfk_{c_idx}"
                             c_params[c_pname] = row_dict[rc]
-                            c_where_parts.append(f'"{fc}" = :{c_pname}')
+                            c_where_parts.append(f"{_q(fc)} = :{c_pname}")
 
                         c_where = " AND ".join(c_where_parts)
                         # Count total child records
-                        count_q = text(f'SELECT COUNT(*) FROM "{c_schema}"."{c_table}" WHERE {c_where}')
+                        child_tbl_sql = f"{_q(c_schema)}.{_q(c_table)}"
+                        if is_mssql:
+                            count_q = text(f"SELECT COUNT(*) FROM {child_tbl_sql} WHERE {c_where}")
+                        else:
+                            count_q = text(f'SELECT COUNT(*) FROM "{c_schema}"."{c_table}" WHERE {c_where}')
                         c_count = db_conn.execute(count_q, c_params).scalar() or 0
 
                         # Fetch sample child records (first 50)
-                        sample_q = text(f'SELECT * FROM "{c_schema}"."{c_table}" WHERE {c_where} LIMIT 50')
+                        if is_mssql:
+                            sample_q = text(f"SELECT TOP 50 * FROM {child_tbl_sql} WHERE {c_where}")
+                        else:
+                            sample_q = text(f'SELECT * FROM "{c_schema}"."{c_table}" WHERE {c_where} LIMIT 50')
                         sample_res = db_conn.execute(sample_q, c_params)
                         c_columns = list(sample_res.keys()) if sample_res.returns_rows else []
                         c_rows: List[List[Any]] = []

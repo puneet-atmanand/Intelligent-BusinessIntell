@@ -41,7 +41,8 @@ def validate_and_format_sql(
     raw_sql: str,
     dialect: str = "postgres",
     allow_dml: bool = False,
-    row_limit: int = 10000,
+    row_limit: Optional[int] = 10000,
+    force_limit: bool = False,
 ) -> str:
     """Validate SQL query with AST safety guardrails and enforce row limit."""
     cleaned = sanitize_sql_comments(raw_sql)
@@ -52,6 +53,8 @@ def validate_and_format_sql(
     glot_dialect = dialect.lower()
     if glot_dialect in ("postgresql", "postgres"):
         glot_dialect = "postgres"
+    elif glot_dialect in ("mssql", "tsql"):
+        glot_dialect = "tsql"
     elif glot_dialect == "duckdb":
         glot_dialect = "duckdb"
     elif glot_dialect in ("sqlite", "mysql", "clickhouse"):
@@ -99,17 +102,22 @@ def validate_and_format_sql(
             raise SQLGuardrailError(f"Prohibited function detected: '{prohibited_name}'.")
 
     # 5. Enforce or clamp LIMIT
-    if isinstance(ast, exp.Select):
+    if isinstance(ast, (exp.Select, exp.Union)):
         limit_node = ast.args.get("limit")
-        if limit_node:
-            try:
-                current_limit = int(limit_node.expression.this)
-                if current_limit > row_limit:
-                    ast.set("limit", exp.Limit(expression=exp.Literal.number(row_limit)))
-            except Exception:
+        if force_limit:
+            if row_limit is not None:
                 ast.set("limit", exp.Limit(expression=exp.Literal.number(row_limit)))
+        elif limit_node:
+            if row_limit is not None:
+                try:
+                    current_limit = int(limit_node.expression.this)
+                    if current_limit > row_limit:
+                        ast.set("limit", exp.Limit(expression=exp.Literal.number(row_limit)))
+                except Exception:
+                    ast.set("limit", exp.Limit(expression=exp.Literal.number(row_limit)))
         else:
-            ast.set("limit", exp.Limit(expression=exp.Literal.number(row_limit)))
+            if row_limit is not None:
+                ast.set("limit", exp.Limit(expression=exp.Literal.number(row_limit)))
 
     # Return transpiled SQL in target dialect
     return ast.sql(dialect=glot_dialect)

@@ -69,6 +69,10 @@ async def list_dashboards(
 
     out = []
     for d in dashboards:
+        valid_charts = [_format_dashboard_chart(c) for c in d.charts if getattr(c, "chart", None) is not None]
+        # Skip auto-generated overview or full dashboards that have no valid charts
+        if not valid_charts and (d.slug.endswith("-overview") or d.slug.endswith("-full-dashboard")):
+            continue
         out.append(
             DashboardOut(
                 id=d.id,
@@ -79,7 +83,7 @@ async def list_dashboards(
                 layout=d.layout or {},
                 owners=d.owners or [],
                 created_by_id=d.created_by_id,
-                charts=[_format_dashboard_chart(c) for c in d.charts],
+                charts=valid_charts,
                 filters=[
                     {
                         "id": str(f.id),

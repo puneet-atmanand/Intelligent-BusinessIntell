@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Globe,
   Plus,
@@ -40,6 +41,7 @@ import { SyncHistoryModal } from "./SyncHistoryModal";
 
 export function ApiConnectionsPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   // Primary Data State
   const [connections, setConnections] = useState<ApiConnection[]>([]);
@@ -177,6 +179,9 @@ export function ApiConnectionsPage() {
     if (!confirm("Are you sure you want to delete this connection?")) return;
     try {
       await api.deleteApiConnection(connId);
+      queryClient.invalidateQueries({ queryKey: ["datasets"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboards"] });
+      queryClient.invalidateQueries({ queryKey: ["charts"] });
       await loadAllData();
     } catch {
       // ignore
@@ -187,6 +192,9 @@ export function ApiConnectionsPage() {
     if (!confirm("Are you sure you want to delete this collection and its tables?")) return;
     try {
       await api.deleteApiCollection(colId);
+      queryClient.invalidateQueries({ queryKey: ["datasets"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboards"] });
+      queryClient.invalidateQueries({ queryKey: ["charts"] });
       await loadAllData();
     } catch {
       // ignore
@@ -209,6 +217,9 @@ export function ApiConnectionsPage() {
     if (!confirm("Are you sure you want to delete this table?")) return;
     try {
       await api.deleteApiTable(tableId);
+      queryClient.invalidateQueries({ queryKey: ["datasets"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboards"] });
+      queryClient.invalidateQueries({ queryKey: ["charts"] });
       await loadAllData();
     } catch {
       // ignore

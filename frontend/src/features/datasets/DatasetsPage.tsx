@@ -33,6 +33,8 @@ export const DatasetsPage: React.FC = () => {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDataset, setSelectedDataset] = useState<DatasetItem | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBatchDeleting, setIsBatchDeleting] = useState(false);
   const [activeTab, setActiveTab] = useState<"columns" | "metrics" | "profile" | "data">("columns");
   const [pageSize, setPageSize] = useState<number>(100);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -121,6 +123,8 @@ export const DatasetsPage: React.FC = () => {
     mutationFn: (id: string) => api.deleteDataset(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["datasets"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboards"] });
+      queryClient.invalidateQueries({ queryKey: ["charts"] });
       if (selectedDataset) setSelectedDataset(null);
     },
   });
@@ -177,6 +181,73 @@ export const DatasetsPage: React.FC = () => {
       (d.table_name && d.table_name.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
+  const isAllSelected =
+    filteredDatasets.length > 0 &&
+    filteredDatasets.every((d) => selectedIds.has(d.id));
+
+  const isIndeterminate =
+    selectedIds.size > 0 && !isAllSelected;
+
+  const handleToggleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        filteredDatasets.forEach((d) => next.delete(d.id));
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        filteredDatasets.forEach((d) => next.add(d.id));
+        return next;
+      });
+    }
+  };
+
+  const handleToggleSelect = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedIds(new Set());
+  };
+
+  const handleBatchDelete = async () => {
+    const count = selectedIds.size;
+    if (count === 0) return;
+    const confirmMessage =
+      count === 1
+        ? "Are you sure you want to delete this dataset? This will also remove any charts created from it."
+        : `Are you sure you want to delete all ${count} selected datasets? This will also remove any charts created from them.`;
+    if (!window.confirm(confirmMessage)) return;
+
+    setIsBatchDeleting(true);
+    try {
+      const idsToDelete = Array.from(selectedIds);
+      await api.batchDeleteDatasets(idsToDelete);
+      setSelectedIds(new Set());
+      await queryClient.invalidateQueries({ queryKey: ["datasets"] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboards"] });
+      await queryClient.invalidateQueries({ queryKey: ["charts"] });
+      if (selectedDataset && selectedIds.has(selectedDataset.id)) {
+        setSelectedDataset(null);
+      }
+    } catch (err: any) {
+      alert(err?.response?.data?.message || err?.message || "Failed to batch delete datasets");
+    } finally {
+      setIsBatchDeleting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Header */}
@@ -205,8 +276,8 @@ export const DatasetsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Filter Bar */}
-      <div className="bg-white p-4 rounded-lg border border-slate-200 flex items-center justify-between gap-4">
+      {/* Filter & Bulk Actions Bar */}
+      <div className="bg-white p-4 rounded-lg border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="relative w-full max-w-sm">
           <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
           <input
@@ -217,8 +288,40 @@ export const DatasetsPage: React.FC = () => {
             className="w-full pl-9 pr-3 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
-        <div className="text-xs text-slate-500">
-          Showing {filteredDatasets.length} of {datasetList.length} datasets
+
+        <div className="flex items-center gap-3">
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-2 bg-red-50 border border-red-200 px-3 py-1.5 rounded-lg animate-in fade-in">
+              <span className="text-xs font-semibold text-red-800">
+                {selectedIds.size} selected
+              </span>
+              <button
+                onClick={handleBatchDelete}
+                disabled={isBatchDeleting}
+                className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-md shadow-sm transition disabled:opacity-50"
+                title="Delete all selected datasets"
+              >
+                {isBatchDeleting ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5" />
+                )}
+                {selectedIds.size === filteredDatasets.length && filteredDatasets.length > 1
+                  ? `Delete All (${selectedIds.size})`
+                  : `Delete Selected (${selectedIds.size})`}
+              </button>
+              <button
+                onClick={handleDeselectAll}
+                className="text-xs text-slate-500 hover:text-slate-800 px-1.5 py-0.5 rounded hover:bg-red-100/60"
+              >
+                Clear
+              </button>
+            </div>
+          )}
+
+          <div className="text-xs text-slate-500">
+            Showing {filteredDatasets.length} of {datasetList.length} datasets
+          </div>
         </div>
       </div>
 
@@ -227,6 +330,30 @@ export const DatasetsPage: React.FC = () => {
         <table className="w-full text-left text-xs">
           <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
             <tr>
+              <th className="px-3 py-3 w-12 text-center">
+                <div className="flex items-center justify-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    checked={isAllSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = isIndeterminate;
+                    }}
+                    onChange={handleToggleSelectAll}
+                    className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
+                    title={isAllSelected ? "Deselect all" : "Select all datasets"}
+                  />
+                  {selectedIds.size > 0 && (
+                    <button
+                      onClick={handleBatchDelete}
+                      disabled={isBatchDeleting}
+                      className="p-1 text-red-600 hover:text-red-700 hover:bg-red-100 rounded transition"
+                      title={`Delete ${selectedIds.size} selected dataset(s)`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </th>
               <th className="px-4 py-3">Dataset Name</th>
               <th className="px-4 py-3">Source Table / Query</th>
               <th className="px-4 py-3">Type</th>
@@ -237,80 +364,95 @@ export const DatasetsPage: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {filteredDatasets.map((dataset) => (
-              <tr key={dataset.id} className="hover:bg-slate-50 transition">
-                <td className="px-4 py-3 font-medium text-slate-900">
-                  <button
-                    onClick={() => setSelectedDataset(dataset)}
-                    className="hover:text-blue-600 text-left font-semibold flex items-center gap-2"
-                  >
-                    <Layers className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                    <span>{dataset.name}</span>
-                  </button>
-                </td>
-                <td className="px-4 py-3 font-mono text-slate-600">
-                  {dataset.is_virtual ? "Virtual SQL" : dataset.table_name || "—"}
-                </td>
-                <td className="px-4 py-3">
-                  <span
-                    className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded ${
-                      dataset.is_virtual
-                        ? "bg-purple-100 text-purple-700"
-                        : "bg-blue-100 text-blue-700"
-                    }`}
-                  >
-                    {dataset.is_virtual ? "Virtual" : "Physical"}
-                  </span>
-                </td>
-                <td className="px-4 py-3 font-mono text-slate-700">
-                  {dataset.columns?.length || 0}
-                </td>
-                <td className="px-4 py-3 font-mono text-slate-700">
-                  {dataset.metrics?.length || 0}
-                </td>
-                <td className="px-4 py-3">
-                  {dataset.is_ai_enabled ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] text-green-700 font-medium">
-                      <Sparkles className="w-3 h-3 text-green-600" />
-                      Enabled
-                    </span>
-                  ) : (
-                    <span className="text-[11px] text-slate-400">Disabled</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <div className="flex items-center justify-end gap-2">
+            {filteredDatasets.map((dataset) => {
+              const isSelected = selectedIds.has(dataset.id);
+              return (
+                <tr
+                  key={dataset.id}
+                  className={`transition ${isSelected ? "bg-blue-50/70 hover:bg-blue-50" : "hover:bg-slate-50"}`}
+                >
+                  <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => handleToggleSelect(dataset.id)}
+                      className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
+                      title={isSelected ? "Deselect dataset" : "Select dataset"}
+                    />
+                  </td>
+                  <td className="px-4 py-3 font-medium text-slate-900">
                     <button
                       onClick={() => setSelectedDataset(dataset)}
-                      className="px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 rounded transition"
+                      className="hover:text-blue-600 text-left font-semibold flex items-center gap-2"
                     >
-                      Detail
+                      <Layers className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                      <span>{dataset.name}</span>
                     </button>
-                    <button
-                      onClick={() => navigate(`/charts?dataset=${dataset.id}`)}
-                      className="px-2.5 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded transition flex items-center gap-1"
+                  </td>
+                  <td className="px-4 py-3 font-mono text-slate-600">
+                    {dataset.is_virtual ? "Virtual SQL" : dataset.table_name || "—"}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded ${
+                        dataset.is_virtual
+                          ? "bg-purple-100 text-purple-700"
+                          : "bg-blue-100 text-blue-700"
+                      }`}
                     >
-                      <BarChart3 className="w-3.5 h-3.5" />
-                      Explore
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (confirm(`Delete dataset '${dataset.name}'?`)) {
-                          deleteMutation.mutate(dataset.id);
-                        }
-                      }}
-                      className="text-slate-400 hover:text-red-600 p-1 rounded transition"
-                      title="Delete dataset"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+                      {dataset.is_virtual ? "Virtual" : "Physical"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-slate-700">
+                    {dataset.columns?.length || 0}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-slate-700">
+                    {dataset.metrics?.length || 0}
+                  </td>
+                  <td className="px-4 py-3">
+                    {dataset.is_ai_enabled ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] text-green-700 font-medium">
+                        <Sparkles className="w-3 h-3 text-green-600" />
+                        Enabled
+                      </span>
+                    ) : (
+                      <span className="text-[11px] text-slate-400">Disabled</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => setSelectedDataset(dataset)}
+                        className="px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 rounded transition"
+                      >
+                        Detail
+                      </button>
+                      <button
+                        onClick={() => navigate(`/charts?dataset=${dataset.id}`)}
+                        className="px-2.5 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded transition flex items-center gap-1"
+                      >
+                        <BarChart3 className="w-3.5 h-3.5" />
+                        Explore
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (confirm(`Delete dataset '${dataset.name}'?`)) {
+                            deleteMutation.mutate(dataset.id);
+                          }
+                        }}
+                        className="text-slate-400 hover:text-red-600 p-1 rounded transition"
+                        title="Delete dataset"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
             {filteredDatasets.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-slate-400 text-xs">
+                <td colSpan={8} className="px-4 py-10 text-center text-slate-400 text-xs">
                   No datasets found. Import a file or register a table in SQL Lab.
                 </td>
               </tr>

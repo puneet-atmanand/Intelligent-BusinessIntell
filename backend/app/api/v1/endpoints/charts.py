@@ -1,4 +1,5 @@
 """Charts API Endpoints."""
+import logging
 import uuid
 import time
 from typing import Any, Dict, List, Optional
@@ -21,6 +22,8 @@ from app.schemas.chart import (
     ChartUpdate,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/charts", tags=["Charts"])
 
 
@@ -32,7 +35,8 @@ async def list_charts(
     """List all saved charts."""
     stmt = (
         select(Chart)
-        .where(Chart.deleted_at.is_(None))
+        .join(Dataset, Dataset.id == Chart.dataset_id)
+        .where(Chart.deleted_at.is_(None), Dataset.deleted_at.is_(None))
         .order_by(Chart.created_at.desc())
     )
     result = await session.execute(stmt)
@@ -297,9 +301,13 @@ async def get_chart_data(
     connector = get_connector(db_conn)
     try:
         query_res = connector.execute_query(sql, limit=payload.row_limit)
-    except AppException:
-        raise
     except Exception as e:
+        logger.error(
+            f"Chart query execution failed for dataset {dataset.id} ({dataset.name}). SQL: {sql}. Error: {e}",
+            exc_info=True,
+        )
+        if isinstance(e, AppException):
+            raise
         raise AppException(
             f"Query execution failed: {str(e)}",
             code="QUERY_EXECUTION_ERROR",

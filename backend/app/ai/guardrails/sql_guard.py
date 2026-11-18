@@ -42,6 +42,8 @@ class AISQLGuard:
         norm_dialect = (dialect or "duckdb").lower()
         if norm_dialect in ("postgresql", "postgres"):
             norm_dialect = "postgres"
+        elif norm_dialect in ("mssql", "tsql"):
+            norm_dialect = "tsql"
 
         try:
             parsed = sqlglot.parse_one(cleaned_sql, read=norm_dialect)
@@ -78,4 +80,4 @@ class AISQLGuard:
             except Exception:
                 parsed = parsed.limit(limit)
 
-        return parsed.sql(dialect=dialect)
+        return parsed.sql(dialect=norm_dialect)

@@ -38,6 +38,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
             async with AsyncSessionLocal() as session:
                 await init_system_data(session)
+                from app.services.cascade_delete_service import cleanup_orphaned_records
+                await cleanup_orphaned_records(session)
         except Exception as e:
             logger.warning(f"Startup database initialization warning: {e}")
 
