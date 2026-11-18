@@ -1,7 +1,8 @@
 """User, Role, and Permission Models."""
 import uuid
+from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import Boolean, ForeignKey, String, Text, Uuid
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, BaseModel
@@ -85,6 +86,8 @@ class User(BaseModel):
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_login: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
 
     roles: Mapped[List["Role"]] = relationship(
         "Role",
@@ -92,4 +95,19 @@ class User(BaseModel):
         back_populates="users",
         lazy="selectin",
     )
+
+    @property
+    def role(self) -> str:
+        """Normalized role string for RBAC."""
+        if self.is_superuser:
+            return "SUPERADMIN"
+        for r in (self.roles or []):
+            if r.name.lower() in ["admin", "superadmin"]:
+                return "SUPERADMIN"
+        return "USER"
+
+    @property
+    def password_hash(self) -> str:
+        """Alias for hashed_password."""
+        return self.hashed_password
 

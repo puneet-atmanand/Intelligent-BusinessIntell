@@ -1,6 +1,11 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { AdminRoute } from "@/components/AdminRoute";
 import { AppShell } from "@/app/layout/AppShell";
+import { LoginPage } from "@/features/auth/LoginPage";
+import { RegisterPage } from "@/features/auth/RegisterPage";
+import { ForgotPasswordPage } from "@/features/auth/ForgotPasswordPage";
+import { SuperLoginPage } from "@/features/auth/SuperLoginPage";
 import { HomePage } from "@/features/home/HomePage";
 import { DashboardsPage } from "@/features/dashboards/DashboardsPage";
 import { ChartsPage } from "@/features/charts/ChartsPage";
@@ -13,10 +18,25 @@ import { SettingsPage } from "@/features/settings/SettingsPage";
 import { AdminPage } from "@/features/admin/AdminPage";
 
 export const router = createBrowserRouter([
+  // Public Authentication Portals
   {
     path: "/login",
-    element: <Navigate to="/" replace />,
+    element: <LoginPage />,
   },
+  {
+    path: "/register",
+    element: <RegisterPage />,
+  },
+  {
+    path: "/forgot-password",
+    element: <ForgotPasswordPage />,
+  },
+  {
+    path: "/super-login",
+    element: <SuperLoginPage />,
+  },
+
+  // Protected Application Shell (Client / BI Workspace)
   {
     path: "/",
     element: (
@@ -71,7 +91,11 @@ export const router = createBrowserRouter([
       },
       {
         path: "admin",
-        element: <AdminPage />,
+        element: (
+          <AdminRoute>
+            <AdminPage />
+          </AdminRoute>
+        ),
       },
     ],
   },
@@ -80,4 +104,3 @@ export const router = createBrowserRouter([
     element: <Navigate to="/" replace />,
   },
 ]);
-

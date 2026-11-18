@@ -20,12 +20,14 @@ target_metadata = Base.metadata
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
-    url = settings.METADATA_DATABASE_SYNC_URL or settings.METADATA_DATABASE_URL.replace("+asyncpg", "")
+    url = settings.METADATA_DATABASE_SYNC_URL or settings.METADATA_DATABASE_URL.replace("+asyncpg", "").replace("+aiosqlite", "")
+    is_sqlite = "sqlite" in str(url)
     context.configure(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        render_as_batch=is_sqlite,
     )
 
     with context.begin_transaction():
@@ -33,7 +35,12 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    is_sqlite = "sqlite" in settings.METADATA_DATABASE_URL
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        render_as_batch=is_sqlite,
+    )
     with context.begin_transaction():
         context.run_migrations()
 
@@ -43,10 +50,13 @@ async def run_async_migrations() -> None:
     configuration = config.get_section(config.config_ini_section) or {}
     configuration["sqlalchemy.url"] = settings.METADATA_DATABASE_URL
 
+    connect_args = {"check_same_thread": False} if "sqlite" in settings.METADATA_DATABASE_URL else {}
+
     connectable = async_engine_from_config(
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=connect_args,
     )
 
     async with connectable.connect() as connection:

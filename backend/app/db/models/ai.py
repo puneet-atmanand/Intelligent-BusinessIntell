@@ -99,3 +99,34 @@ class AIFeedback(BaseModel):
 
     message: Mapped["AIMessage"] = relationship("AIMessage", back_populates="feedback")
 
+
+class AIResultSnapshot(BaseModel):
+    """Snapshot of AI query results for Explore as Chart."""
+    __tablename__ = "ai_result_snapshots"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    message_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=True,
+        index=True,
+    )
+    dataset_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=True,
+    )
+    dataset_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    sql: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    columns: Mapped[List[str]] = mapped_column(JSON, default=list)
+    column_types: Mapped[List[str]] = mapped_column(JSON, default=list)
+    rows: Mapped[List[List[Any]]] = mapped_column(JSON, default=list)
+    row_count: Mapped[int] = mapped_column(Integer, default=0)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    recommended_chart: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+

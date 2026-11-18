@@ -21,7 +21,17 @@ from app.ai.tools import (
     tool_get_table_schema,
     tool_list_datasets_and_tables,
 )
-from app.db.models import AIConversation, AIMessage, AIToolCall, DatabaseConnection, Dataset, User
+from app.db.models import (
+    AIConversation,
+    AIMessage,
+    AIToolCall,
+    Chart,
+    Dashboard,
+    DashboardChart,
+    DatabaseConnection,
+    Dataset,
+    User,
+)
 
 
 def recommend_chart_for_results(
@@ -100,12 +110,103 @@ class AIOrchestrator:
         conversation_id: Optional[uuid.UUID] = None,
         dataset_id: Optional[uuid.UUID] = None,
         database_id: Optional[uuid.UUID] = None,
+        dashboard_id: Optional[uuid.UUID] = None,
         max_turns: int = 5,
     ) -> Dict[str, Any]:
         """Execute agentic conversational turn with grounded SQL execution."""
         start_time = time.time()
 
-        # 1. Fetch or create conversation
+        # 1. Resolve active dashboard or active dataset
+        dash: Optional[Dashboard] = None
+        dash_datasets: List[Dataset] = []
+        dash_charts: List[Chart] = []
+        if dashboard_id:
+            try:
+                dash_uuid = dashboard_id if isinstance(dashboard_id, uuid.UUID) else uuid.UUID(str(dashboard_id))
+            except ValueError:
+                dash_uuid = None
+
+            if dash_uuid:
+                dash_res = await session.execute(
+                    select(Dashboard)
+                    .options(selectinload(Dashboard.charts))
+                    .where(Dashboard.id == dash_uuid, Dashboard.deleted_at.is_(None))
+                )
+                dash = dash_res.scalar_one_or_none()
+
+            if dash and dash.charts:
+                chart_ids = [c.chart_id for c in dash.charts]
+                ch_res = await session.execute(
+                    select(Chart)
+                    .where(Chart.id.in_(chart_ids), Chart.deleted_at.is_(None))
+                )
+                dash_charts = ch_res.scalars().all()
+                ds_ids = list({c.dataset_id for c in dash_charts if c.dataset_id})
+                if ds_ids:
+                    ds_all_res = await session.execute(
+                        select(Dataset)
+                        .options(selectinload(Dataset.columns), selectinload(Dataset.metrics))
+                        .where(Dataset.id.in_(ds_ids), Dataset.deleted_at.is_(None))
+                    )
+                    dash_datasets = ds_all_res.scalars().all()
+
+        context_hint = ""
+        ds: Optional[Dataset] = None
+        if dataset_id:
+            try:
+                ds_uuid = dataset_id if isinstance(dataset_id, uuid.UUID) else uuid.UUID(str(dataset_id))
+            except ValueError:
+                ds_uuid = None
+
+            if ds_uuid:
+                ds_res = await session.execute(
+                    select(Dataset)
+                    .options(selectinload(Dataset.columns), selectinload(Dataset.metrics))
+                    .where(Dataset.id == ds_uuid, Dataset.deleted_at.is_(None))
+                )
+                ds = ds_res.scalar_one_or_none()
+
+        if not ds and dash_datasets:
+            ds = dash_datasets[0]
+
+        if dash:
+            dataset_lines = []
+            for d in dash_datasets:
+                col_names = ", ".join([c.name for c in (d.columns or [])[:15]])
+                dataset_lines.append(f"  * Dataset: '{d.name}' | Table: '{d.table_name}' | Schema: '{d.schema_name or 'public'}' | Columns: {col_names or 'Inspect schema'}")
+
+            chart_lines = [f"  * Chart: '{c.title}' (Viz: {c.viz_type})" for c in dash_charts[:10]]
+            allowed_tables = ", ".join([f"'{d.table_name}'" for d in dash_datasets])
+
+            context_hint = (
+                f"\n\n### ACTIVE DASHBOARD CONTEXT (STRICT ISOLATION & SCOPE):\n"
+                f"- The user is specifically exploring Dashboard: '{dash.title}'\n"
+                f"- Description: {dash.description or 'None'}\n"
+                f"- Included Datasets & Tables:\n" + ("\n".join(dataset_lines) if dataset_lines else "  * None") + "\n"
+                f"- Visualized Charts on this Dashboard:\n" + ("\n".join(chart_lines) if chart_lines else "  * None") + "\n"
+                f"- STRICT ISOLATION RULE: You MUST focus your analysis, queries, and answers EXCLUSIVELY on data and tables belonging to Dashboard '{dash.title}' ({allowed_tables or 'No tables'}). Do NOT reference, combine, or query any tables from other dashboards or datasets."
+            )
+        elif ds:
+            db_conn_res = await session.execute(
+                select(DatabaseConnection).where(
+                    DatabaseConnection.id == ds.database_id,
+                    DatabaseConnection.deleted_at.is_(None),
+                )
+            )
+            db_conn = db_conn_res.scalar_one_or_none()
+            db_dialect = db_conn.dialect if db_conn else "SQL"
+            col_list = ", ".join([f"{c.name} ({c.data_type})" for c in (ds.columns or [])])
+            context_hint = (
+                f"\n\n### ACTIVE DATASET CONTEXT (STRICT ISOLATION & SCOPE):\n"
+                f"- The user is specifically exploring dataset: '{ds.name}'\n"
+                f"- Target Table: '{ds.table_name}'\n"
+                f"- Database ID: '{ds.database_id}' (Dialect: {db_dialect})\n"
+                f"- Schema Name: '{ds.schema_name or 'public'}'\n"
+                f"- Columns: {col_list or 'Inspect with get_table_schema'}\n"
+                f"- STRICT ISOLATION RULE: You MUST focus your analysis, SQL generation, and answers EXCLUSIVELY on table '{ds.table_name}'. Do NOT reference, combine, or query any other tables."
+            )
+
+        # 2. Fetch or create conversation with strict isolation
         if conversation_id:
             try:
                 conv_uuid = conversation_id if isinstance(conversation_id, uuid.UUID) else uuid.UUID(str(conversation_id))
@@ -126,10 +227,32 @@ class AIOrchestrator:
         else:
             conversation = None
 
+        # Cross-dashboard or cross-dataset isolation check
+        if conversation:
+            if dash:
+                dash_tag = f"[dash:{dash.id}]"
+                if conversation.title.startswith("[dash:") and not conversation.title.startswith(dash_tag):
+                    conversation = None
+                elif conversation.title.startswith("[ds:"):
+                    conversation = None
+            elif ds:
+                ds_tag = f"[ds:{ds.id}]"
+                if conversation.title.startswith("[ds:") and not conversation.title.startswith(ds_tag):
+                    conversation = None
+                elif conversation.title.startswith("[dash:"):
+                    conversation = None
+
         if not conversation:
+            if dash:
+                conv_prefix = f"[dash:{dash.id}] "
+            elif ds:
+                conv_prefix = f"[ds:{ds.id}] "
+            else:
+                conv_prefix = ""
+            clean_title = (prompt[:70] if len(prompt) > 70 else prompt).strip()
             conversation = AIConversation(
                 user_id=user.id,
-                title=prompt[:80] if len(prompt) > 80 else prompt,
+                title=f"{conv_prefix}{clean_title}"[:200],
             )
             session.add(conversation)
             await session.flush()
@@ -145,7 +268,7 @@ class AIOrchestrator:
             if hm.role in ("user", "assistant") and hm.content:
                 history_messages.append(LLMMessage(role=hm.role, content=hm.content))
 
-        # 2. Record User Message
+        # 3. Record User Message
         user_message_record = AIMessage(
             conversation_id=conversation.id,
             role="user",
@@ -238,20 +361,35 @@ class AIOrchestrator:
                     )
 
                 elif tc.name == "get_table_schema":
+                    req_table = tc.arguments.get("table_name", "")
+                    target_ds_id = tc.arguments.get("dataset_id")
+                    if dash_datasets:
+                        matched = next((d for d in dash_datasets if d.table_name == req_table), None)
+                        if matched:
+                            target_ds_id = str(matched.id)
+                            req_table = matched.table_name
+                        elif not target_ds_id and dash_datasets:
+                            target_ds_id = str(dash_datasets[0].id)
+                            req_table = dash_datasets[0].table_name
+                    elif ds and (not target_ds_id or not req_table or req_table == ds.table_name):
+                        target_ds_id = str(ds.id)
+                        req_table = ds.table_name
                     tool_output = await tool_get_table_schema(
                         session=session,
-                        table_name=tc.arguments.get("table_name", ""),
-                        dataset_id=tc.arguments.get("dataset_id"),
+                        table_name=req_table or (ds.table_name if ds else ""),
+                        dataset_id=target_ds_id,
                     )
 
                 elif tc.name == "execute_sql_query":
                     sql = tc.arguments.get("sql", "")
-                    target_db_id = tc.arguments.get("database_id")
-                    if not target_db_id:
-                        if database_id:
-                            target_db_id = str(database_id)
-                        elif ds:
-                            target_db_id = str(ds.database_id)
+                    # When scoped to a dataset or dashboard, enforce the active database connection
+                    active_target_db_id = None
+                    if ds:
+                        active_target_db_id = str(ds.database_id)
+                    elif dash_datasets:
+                        active_target_db_id = str(dash_datasets[0].database_id)
+
+                    target_db_id = active_target_db_id or (tc.arguments.get("database_id") or (str(database_id) if database_id else None))
                     tool_output = await tool_execute_sql_query(
                         session=session,
                         sql=sql,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
@@ -16,9 +16,11 @@ import {
   LayoutGrid,
   BarChart3,
   Compass,
+  Sparkles,
 } from "lucide-react";
 import { api, DashboardItem, ChartItem } from "@/app/api";
 import { chartRegistry } from "@/charts";
+import { AIDrawer } from "@/features/ai/AIDrawer";
 
 // Single Chart Tile on the Dashboard
 const DashboardChartTile: React.FC<{
@@ -58,6 +60,11 @@ const DashboardChartTile: React.FC<{
     queryFn: async () => {
       if (!chart || isHeader) return null;
       const p = chart.params || {};
+
+      // If chart originated from AI query result with cached data, return it directly
+      if (p.source_type === "ai_query_result" && p.cached_query_result) {
+        return p.cached_query_result;
+      }
 
       // Merge chart-level filters with active dashboard filters
       const mergedFilters = [...(p.filters || [])];
@@ -235,6 +242,7 @@ export const DashboardsPage: React.FC = () => {
   const [newTitle, setNewTitle] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [isAddChartModalOpen, setIsAddChartModalOpen] = useState(false);
+  const [isDashboardAIDrawerOpen, setIsDashboardAIDrawerOpen] = useState(false);
 
   // Queries
   const { data: dashboards = [], isLoading: isLoadingDashboards, refetch: refetchDashboards } = useQuery({
@@ -271,6 +279,20 @@ export const DashboardsPage: React.FC = () => {
       refetchDashboards();
     }
   }, [targetSlugOrId, dashboardList, isLoadingDashboards, refetchDashboards]);
+
+  // Resolved primary dataset from charts on this dashboard
+  const dashboardPrimaryDataset = useMemo(() => {
+    if (!activeDashboard || !activeDashboard.charts || activeDashboard.charts.length === 0) {
+      return null;
+    }
+    for (const placement of activeDashboard.charts) {
+      const ch = allChartsList.find((c) => c.id === placement.chart_id);
+      if (ch && ch.dataset_id) {
+        return { id: ch.dataset_id, name: ch.title };
+      }
+    }
+    return null;
+  }, [activeDashboard, allChartsList]);
 
   // Auto refresh timer
   useEffect(() => {
@@ -669,6 +691,31 @@ export const DashboardsPage: React.FC = () => {
               </button>
             </div>
           )}
+
+          {/* Floating AI Button at bottom-right dedicated to the open dashboard */}
+          <div className="fixed bottom-6 right-6 z-40 flex items-center">
+            <button
+              onClick={() => setIsDashboardAIDrawerOpen(true)}
+              className="group relative flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-full shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-200 ring-4 ring-blue-500/20"
+              title={`Ask AI about ${activeDashboard.title || "this dashboard"}`}
+            >
+              <Sparkles className="w-5 h-5 animate-pulse text-amber-300" />
+              <span className="text-xs font-bold tracking-wide">
+                Ask AI: {activeDashboard.title ? (activeDashboard.title.length > 24 ? activeDashboard.title.slice(0, 24) + "..." : activeDashboard.title) : "Dashboard"}
+              </span>
+            </button>
+          </div>
+
+          {/* Dedicated AI Drawer bound specifically to the current open dashboard with key-based unmount/isolation */}
+          <AIDrawer
+            key={activeDashboard.id}
+            isOpen={isDashboardAIDrawerOpen}
+            onClose={() => setIsDashboardAIDrawerOpen(false)}
+            dashboardId={activeDashboard.id}
+            dashboardName={activeDashboard.title}
+            datasetId={dashboardPrimaryDataset?.id}
+            datasetName={dashboardPrimaryDataset?.name || activeDashboard.title}
+          />
         </div>
       )}
 
