@@ -409,9 +409,11 @@ def build_join_sql(
     else:
         # Default: avoid column collisions by prefixing table alias
         for c in left_info.get("columns", []):
-            select_items.append(f"t1.{_quote_ident(c['name'], dialect)} AS {_quote_ident(f't1_{c['name']}', dialect)}")
+            c_name = c["name"]
+            select_items.append(f"t1.{_quote_ident(c_name, dialect)} AS {_quote_ident('t1_' + c_name, dialect)}")
         for c in right_info.get("columns", []):
-            select_items.append(f"t2.{_quote_ident(c['name'], dialect)} AS {_quote_ident(f't2_{c['name']}', dialect)}")
+            c_name = c["name"]
+            select_items.append(f"t2.{_quote_ident(c_name, dialect)} AS {_quote_ident('t2_' + c_name, dialect)}")
 
     select_clause = ", ".join(select_items) if select_items else "t1.*, t2.*"
 

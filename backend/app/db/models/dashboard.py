@@ -1,10 +1,13 @@
 """Dashboard, Dashboard Chart Placements, and Native Filters."""
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, Uuid, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import BaseModel
+
+if TYPE_CHECKING:
+    from app.db.models.chart import Chart
 
 
 class Dashboard(BaseModel):
