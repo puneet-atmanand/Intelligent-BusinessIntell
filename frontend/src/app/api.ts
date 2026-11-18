@@ -491,6 +491,7 @@ export interface DashboardPlacement {
   id: string;
   chart_id: string;
   position: { x: number; y: number; w: number; h: number };
+  chart?: ChartItem;
 }
 
 export interface DashboardFilterItem {

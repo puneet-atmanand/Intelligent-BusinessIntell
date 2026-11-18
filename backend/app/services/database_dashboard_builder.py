@@ -7,6 +7,7 @@ Strictly read-only against the target database (allow_dml stays False).
 import logging
 import re
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import delete, inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -464,6 +465,8 @@ async def build_unified_database_dashboard(
         await session.flush()
         dashboard.title = dash_title
         dashboard.description = dash_desc
+        dashboard.created_at = datetime.now(timezone.utc)
+        dashboard.updated_at = datetime.now(timezone.utc)
     else:
         dashboard = Dashboard(
             title=dash_title,

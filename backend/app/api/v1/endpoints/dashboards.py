@@ -3,7 +3,7 @@ import re
 import uuid
 from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, status
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -25,6 +25,30 @@ def generate_slug(title: str) -> str:
     return slug or f"dashboard-{uuid.uuid4().hex[:8]}"
 
 
+def _format_dashboard_chart(c: DashboardChart) -> Dict[str, Any]:
+    chart_payload = None
+    if getattr(c, "chart", None) is not None:
+        ch = c.chart
+        chart_payload = {
+            "id": str(ch.id),
+            "title": ch.title,
+            "description": ch.description,
+            "dataset_id": str(ch.dataset_id),
+            "viz_type": ch.viz_type,
+            "params": ch.params or {},
+            "query_context": ch.query_context or {},
+            "owners": ch.owners or [],
+            "created_at": ch.created_at.isoformat() if ch.created_at else None,
+            "updated_at": ch.updated_at.isoformat() if ch.updated_at else None,
+        }
+    return {
+        "id": str(c.id),
+        "chart_id": str(c.chart_id),
+        "position": c.position or {},
+        "chart": chart_payload,
+    }
+
+
 @router.get("/", response_model=List[DashboardOut])
 async def list_dashboards(
     session: AsyncSession = Depends(get_db_session),
@@ -33,9 +57,12 @@ async def list_dashboards(
     """List all dashboards."""
     stmt = (
         select(Dashboard)
-        .options(selectinload(Dashboard.charts), selectinload(Dashboard.filters))
+        .options(
+            selectinload(Dashboard.charts).selectinload(DashboardChart.chart),
+            selectinload(Dashboard.filters),
+        )
         .where(Dashboard.deleted_at.is_(None))
-        .order_by(Dashboard.created_at.desc())
+        .order_by(func.coalesce(Dashboard.updated_at, Dashboard.created_at).desc())
     )
     result = await session.execute(stmt)
     dashboards = result.scalars().all()
@@ -52,10 +79,7 @@ async def list_dashboards(
                 layout=d.layout or {},
                 owners=d.owners or [],
                 created_by_id=d.created_by_id,
-                charts=[
-                    {"id": str(c.id), "chart_id": str(c.chart_id), "position": c.position}
-                    for c in d.charts
-                ],
+                charts=[_format_dashboard_chart(c) for c in d.charts],
                 filters=[
                     {
                         "id": str(f.id),
@@ -152,7 +176,10 @@ async def get_dashboard(
 
     stmt = (
         select(Dashboard)
-        .options(selectinload(Dashboard.charts), selectinload(Dashboard.filters))
+        .options(
+            selectinload(Dashboard.charts).selectinload(DashboardChart.chart),
+            selectinload(Dashboard.filters),
+        )
         .where(condition, Dashboard.deleted_at.is_(None))
     )
     result = await session.execute(stmt)
@@ -169,10 +196,7 @@ async def get_dashboard(
         layout=dashboard.layout or {},
         owners=dashboard.owners or [],
         created_by_id=dashboard.created_by_id,
-        charts=[
-            {"id": str(c.id), "chart_id": str(c.chart_id), "position": c.position}
-            for c in dashboard.charts
-        ],
+        charts=[_format_dashboard_chart(c) for c in dashboard.charts],
         filters=[
             {
                 "id": str(f.id),

@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Layers,
   Plus,
@@ -27,6 +27,9 @@ import { api, DatasetItem, RowsByKeyResponse } from "@/app/api";
 export const DatasetsPage: React.FC = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { id: paramId } = useParams<{ id?: string }>();
+  const [searchParams] = useSearchParams();
+  const targetId = paramId || searchParams.get("id");
 
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDataset, setSelectedDataset] = useState<DatasetItem | null>(null);
@@ -156,6 +159,17 @@ export const DatasetsPage: React.FC = () => {
   const datasetList: DatasetItem[] = Array.isArray(datasets)
     ? datasets
     : (datasets as any)?.data || [];
+
+  // Synchronize URL parameter :id or ?id= with selectedDataset modal
+  useEffect(() => {
+    if (!targetId || datasetList.length === 0) return;
+    const match = datasetList.find(
+      (d) => d.id === targetId || d.name === targetId || d.table_name === targetId
+    );
+    if (match) {
+      setSelectedDataset(match);
+    }
+  }, [targetId, datasetList]);
 
   const filteredDatasets = datasetList.filter(
     (d) =>
@@ -320,7 +334,10 @@ export const DatasetsPage: React.FC = () => {
                 </p>
               </div>
               <button
-                onClick={() => setSelectedDataset(null)}
+                onClick={() => {
+                  setSelectedDataset(null);
+                  if (paramId) navigate("/datasets");
+                }}
                 className="text-slate-400 hover:text-slate-600 text-lg font-bold"
               >
                 ✕
@@ -881,7 +898,10 @@ export const DatasetsPage: React.FC = () => {
                   Explore in Chart Builder
                 </button>
                 <button
-                  onClick={() => setSelectedDataset(null)}
+                  onClick={() => {
+                    setSelectedDataset(null);
+                    if (paramId) navigate("/datasets");
+                  }}
                   className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-100 transition"
                 >
                   Close

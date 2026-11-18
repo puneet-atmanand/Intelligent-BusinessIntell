@@ -57,6 +57,7 @@ class DashboardChart(BaseModel):
     position: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)  # x, y, w, h
 
     dashboard: Mapped["Dashboard"] = relationship("Dashboard", back_populates="charts")
+    chart: Mapped[Optional["Chart"]] = relationship("Chart", lazy="selectin", foreign_keys=[chart_id])
 
 
 class DashboardFilter(BaseModel):

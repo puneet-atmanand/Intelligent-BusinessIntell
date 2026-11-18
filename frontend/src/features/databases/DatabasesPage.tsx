@@ -254,6 +254,8 @@ export const DatabasesPage: React.FC = () => {
         })),
       };
       setBulkResults(bulkMapped);
+      queryClient.invalidateQueries({ queryKey: ["charts"] });
+      queryClient.invalidateQueries({ queryKey: ["charts"] });
       queryClient.invalidateQueries({ queryKey: ["datasets"] });
       queryClient.invalidateQueries({ queryKey: ["dashboards"] });
       refetchInventory();
@@ -290,6 +292,7 @@ export const DatabasesPage: React.FC = () => {
         is_virtual: false,
       });
       setDatasetCreatedMsg("Created!");
+      queryClient.invalidateQueries({ queryKey: ["charts"] });
       queryClient.invalidateQueries({ queryKey: ["datasets"] });
       queryClient.invalidateQueries({ queryKey: ["dashboards"] });
       setTimeout(() => {

@@ -46,6 +46,10 @@ export const router = createBrowserRouter([
         element: <DatasetsPage />,
       },
       {
+        path: "datasets/:id",
+        element: <DatasetsPage />,
+      },
+      {
         path: "sqllab",
         element: <SqlLabPage />,
       },

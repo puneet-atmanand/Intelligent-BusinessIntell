@@ -23,12 +23,14 @@ import { chartRegistry } from "@/charts";
 // Single Chart Tile on the Dashboard
 const DashboardChartTile: React.FC<{
   chartId: string;
+  chartProp?: ChartItem;
   charts: ChartItem[];
   activeFilters: Record<string, any>;
+  isLoadingCharts?: boolean;
   onRemove?: () => void;
   isEditMode?: boolean;
-}> = ({ chartId, charts, activeFilters, onRemove, isEditMode: _isEditMode }) => {
-  const chart = charts.find((c) => c.id === chartId);
+}> = ({ chartId, chartProp, charts, activeFilters, isLoadingCharts, onRemove, isEditMode: _isEditMode }) => {
+  const chart = chartProp || charts.find((c) => c.id === chartId);
   const navigate = useNavigate();
   const tileRef = useRef<HTMLDivElement | null>(null);
   const [isInView, setIsInView] = useState(false);
@@ -80,6 +82,14 @@ const DashboardChartTile: React.FC<{
   });
 
   if (!chart) {
+    if (isLoadingCharts) {
+      return (
+        <div ref={tileRef} className="h-full w-full flex flex-col items-center justify-center p-4 bg-white border border-slate-200 rounded-xl text-slate-400 text-xs animate-pulse">
+          <RefreshCw className="w-5 h-5 animate-spin text-blue-500 mb-2" />
+          <span>Loading chart...</span>
+        </div>
+      );
+    }
     return (
       <div ref={tileRef} className="h-full w-full flex items-center justify-center p-4 bg-white border border-slate-200 rounded-xl text-slate-400 text-xs">
         Chart not found or deleted.
@@ -224,7 +234,7 @@ export const DashboardsPage: React.FC = () => {
     queryFn: api.getDashboards,
   });
 
-  const { data: allCharts = [] } = useQuery({
+  const { data: allCharts = [], isLoading: isLoadingCharts } = useQuery({
     queryKey: ["charts"],
     queryFn: api.getCharts,
   });
@@ -580,7 +590,7 @@ export const DashboardsPage: React.FC = () => {
           {/* Sticky Section Jump List */}
           {activeDashboard && (() => {
             const sectionHeaders = activeDashboard.charts
-              .map((p) => allCharts.find((c) => c.id === p.chart_id))
+              .map((p) => (p as any).chart || allChartsList.find((c) => c.id === p.chart_id))
               .filter((c): c is ChartItem => Boolean(c && (c.viz_type === "header" || c.params?.is_section_header)));
 
             if (sectionHeaders.length <= 1) return null;
@@ -611,7 +621,7 @@ export const DashboardsPage: React.FC = () => {
           {/* Charts Responsive Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 min-h-[500px]">
             {activeDashboard.charts.map((placement) => {
-              const ch = allCharts.find((c) => c.id === placement.chart_id);
+              const ch = (placement as any).chart || allChartsList.find((c) => c.id === placement.chart_id);
               const isHeader = ch?.viz_type === "header" || ch?.params?.is_section_header;
               return (
                 <div
@@ -620,8 +630,10 @@ export const DashboardsPage: React.FC = () => {
                 >
                   <DashboardChartTile
                     chartId={placement.chart_id}
-                    charts={allCharts}
+                    chartProp={(placement as any).chart}
+                    charts={allChartsList}
                     activeFilters={activeFilters}
+                    isLoadingCharts={isLoadingCharts}
                     isEditMode={isEditMode}
                     onRemove={() => handleRemoveChartFromDashboard(placement.chart_id)}
                   />
