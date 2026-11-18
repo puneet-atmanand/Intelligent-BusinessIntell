@@ -6,7 +6,7 @@ from app.db.models.dataset import Dataset, DatasetColumn, DatasetMetric, RLSRule
 from app.db.models.chart import Chart
 from app.db.models.dashboard import Dashboard, DashboardChart, DashboardFilter
 from app.db.models.sqllab import SavedQuery, QueryHistory
-from app.db.models.ai import AIConversation, AIMessage, AIToolCall, AIFeedback
+from app.db.models.ai import AIConversation, AIMessage, AIToolCall, AIFeedback, AIResultSnapshot
 from app.db.models.audit import AuditLog, ApiToken, ReportSchedule
 from app.db.models.api_connect import (
     ApiConnection,
@@ -43,6 +43,7 @@ __all__ = [
     "AIMessage",
     "AIToolCall",
     "AIFeedback",
+    "AIResultSnapshot",
     "AuditLog",
     "ApiToken",
     "ReportSchedule",

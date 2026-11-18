@@ -4,9 +4,7 @@ import {
   BarChart3,
   Database,
   Terminal,
-  Server,
   UploadCloud,
-  Globe,
   Shield,
   Settings as SettingsIcon,
   ChevronLeft,
@@ -22,7 +20,10 @@ interface SidebarProps {
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { user } = useAuthStore();
-  const isAdmin = user?.is_superuser || user?.roles.some((r) => r.name === "Admin");
+  const isAdmin =
+    user?.is_superuser ||
+    user?.role === "SUPERADMIN" ||
+    user?.roles?.some((r) => r.name === "Admin" || r.name === "Superadmin");
 
   const navItems = [
     { name: "Home", path: "/", icon: LayoutDashboard },
@@ -30,9 +31,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     { name: "Charts", path: "/charts", icon: BarChart3 },
     { name: "Datasets", path: "/datasets", icon: Database },
     { name: "SQL Lab", path: "/sqllab", icon: Terminal },
-    { name: "Databases", path: "/databases", icon: Server },
     { name: "Uploads", path: "/uploads", icon: UploadCloud },
-    { name: "API Connect", path: "/api-connect", icon: Globe },
     { name: "Settings", path: "/settings", icon: SettingsIcon },
   ];
 

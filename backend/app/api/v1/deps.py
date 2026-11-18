@@ -113,3 +113,18 @@ def require_permission(permission_code: str) -> Callable[..., User]:
 
     return permission_checker
 
+
+async def require_superadmin(
+    current_user: User = Depends(get_current_active_user),
+) -> User:
+    """Dependency verifying that the current user is an authorized Super Administrator."""
+    if current_user.is_superuser:
+        return current_user
+
+    # Also check if user has Admin role
+    has_admin_role = any(r.name in ["Admin", "Superadmin"] for r in (current_user.roles or []))
+    if not has_admin_role:
+        raise PermissionDeniedError("Administrator privileges required to access this resource")
+
+    return current_user
+
