@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.security import hash_password
+from app.core.security import hash_password, verify_password
 from app.db.models import (
     DatabaseConnection,
     Permission,
@@ -21,6 +21,7 @@ SYSTEM_ROLES = [
     ("Editor", "Can create and edit charts, dashboards, and datasets", True),
     ("Viewer", "Can view published charts and dashboards", True),
     ("SQL Lab user", "Access to SQL Lab query editor", True),
+    ("User", "Standard user role with analytics and chart creation access", True),
 ]
 
 CORE_PERMISSIONS = [
@@ -128,25 +129,82 @@ async def init_system_data(session: AsyncSession) -> None:
             if not assoc.scalar_one_or_none():
                 session.add(RolePermission(role_id=sqllab_role.id, permission_id=perm.id))
 
-    # 4. Seed Admin User
-    admin_stmt = select(User).where(User.email == settings.ADMIN_EMAIL)
+    # User role (Standard client users)
+    user_role = role_map.get("User")
+    if user_role:
+        for code in editor_perms:
+            if code in permission_map:
+                perm = permission_map[code]
+                assoc = await session.execute(
+                    select(RolePermission).where(
+                        RolePermission.role_id == user_role.id,
+                        RolePermission.permission_id == perm.id,
+                    )
+                )
+                if not assoc.scalar_one_or_none():
+                    session.add(RolePermission(role_id=user_role.id, permission_id=perm.id))
+
+    # Migration check: Ensure users table has is_verified and last_login
+    try:
+        from sqlalchemy import text
+        res = await session.execute(text("PRAGMA table_info(users)"))
+        cols = {r[1] for r in res.fetchall()}
+        if cols:
+            if "is_verified" not in cols:
+                await session.execute(text("ALTER TABLE users ADD COLUMN is_verified BOOLEAN DEFAULT 1"))
+            if "last_login" not in cols:
+                await session.execute(text("ALTER TABLE users ADD COLUMN last_login TIMESTAMP"))
+            await session.flush()
+    except Exception as mig_err:
+        logger.debug(f"Non-critical schema check note: {mig_err}")
+
+    # 4. Seed Super Admin User securely from environment configuration
+    superadmin_email = (getattr(settings, "SUPERADMIN_EMAIL", "") or settings.ADMIN_EMAIL).strip().lower()
+    superadmin_password = getattr(settings, "SUPERADMIN_PASSWORD", "") or settings.ADMIN_PASSWORD
+    superadmin_name = getattr(settings, "SUPERADMIN_NAME", "Super Administrator")
+
+    admin_stmt = select(User).where(User.email == superadmin_email)
     admin_result = await session.execute(admin_stmt)
     admin_user = admin_result.scalar_one_or_none()
 
+    if not admin_user and settings.ADMIN_EMAIL and settings.ADMIN_EMAIL.strip().lower() != superadmin_email:
+        # Check fallback email
+        fb_stmt = select(User).where(User.email == settings.ADMIN_EMAIL.strip().lower())
+        fb_res = await session.execute(fb_stmt)
+        admin_user = fb_res.scalar_one_or_none()
+
     if not admin_user:
-        logger.info(f"Creating default admin user: {settings.ADMIN_EMAIL}")
+        logger.info(f"Creating super admin user: {superadmin_email}")
         admin_user = User(
-            email=settings.ADMIN_EMAIL,
-            full_name="System Administrator",
-            hashed_password=hash_password(settings.ADMIN_PASSWORD),
+            email=superadmin_email,
+            full_name=superadmin_name,
+            hashed_password=hash_password(superadmin_password),
             is_active=True,
             is_superuser=True,
+            is_verified=True,
         )
         session.add(admin_user)
         await session.flush()
 
         # Assign Admin role
         session.add(UserRole(user_id=admin_user.id, role_id=admin_role.id))
+    else:
+        # Super admin exists: safely synchronize flags and credentials without recreating
+        admin_user.is_superuser = True
+        admin_user.is_active = True
+        admin_user.is_verified = True
+        if superadmin_name and not admin_user.full_name:
+            admin_user.full_name = superadmin_name
+
+        # Ensure Admin role is attached
+        assoc = await session.execute(
+            select(UserRole).where(
+                UserRole.user_id == admin_user.id,
+                UserRole.role_id == admin_role.id,
+            )
+        )
+        if not assoc.scalar_one_or_none():
+            session.add(UserRole(user_id=admin_user.id, role_id=admin_role.id))
 
     # 5. Seed Built-in DuckDB 'Uploads' Connection
     uploads_stmt = select(DatabaseConnection).where(DatabaseConnection.name == "Uploads")

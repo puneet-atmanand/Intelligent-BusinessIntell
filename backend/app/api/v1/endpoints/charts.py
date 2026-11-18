@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.api.v1.deps import get_db_session, require_permission
 from app.connectors.factory import get_connector
 from app.core.errors import NotFoundError, AppException, ValidationError
-from app.db.models import Chart, Dataset, DatabaseConnection, Dashboard, DashboardChart, User
+from app.db.models import Chart, Dataset, DatabaseConnection, Dashboard, DashboardChart, User, AIResultSnapshot
 from app.query.cache import QueryResultCache, generate_query_cache_key
 from app.query.chart_query_builder import build_chart_sql
 from app.schemas.chart import (
@@ -236,6 +236,24 @@ async def get_chart_data(
     current_user: User = Depends(require_permission("charts:read")),
 ) -> Any:
     """Execute dynamic chart query and return rows, columns and duration."""
+    # Serve exact AI result snapshot data if requested
+    if payload.ai_snapshot_id:
+        snap_stmt = select(AIResultSnapshot).where(
+            AIResultSnapshot.id == payload.ai_snapshot_id,
+            AIResultSnapshot.deleted_at.is_(None),
+        )
+        snap_res = await session.execute(snap_stmt)
+        snapshot = snap_res.scalar_one_or_none()
+        if snapshot:
+            return ChartDataResponse(
+                columns=snapshot.columns,
+                column_types=snapshot.column_types or [],
+                rows=snapshot.rows,
+                row_count=snapshot.row_count,
+                sql=snapshot.sql or "",
+                duration_ms=snapshot.duration_ms or 0,
+            )
+
     dataset_stmt = (
         select(Dataset)
         .options(selectinload(Dataset.columns), selectinload(Dataset.metrics))

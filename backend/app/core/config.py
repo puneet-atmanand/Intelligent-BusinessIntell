@@ -3,18 +3,27 @@ import os
 import secrets
 from pathlib import Path
 from typing import List, Union
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
+DATA_DIR = (BACKEND_DIR / "data").resolve()
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+DEFAULT_SQLITE_PATH = (DATA_DIR / "intelligent_business.db").resolve().as_posix()
+DEFAULT_SQLITE_URL = f"sqlite+aiosqlite:///{DEFAULT_SQLITE_PATH}"
+DEFAULT_SQLITE_SYNC_URL = f"sqlite:///{DEFAULT_SQLITE_PATH}"
+DEFAULT_DUCKDB_PATH = (DATA_DIR / "askyourdata.duckdb").resolve().as_posix()
+
 ENV_FILE_PATH = BACKEND_DIR / ".env"
+ROOT_ENV_FILE_PATH = BACKEND_DIR.parent / ".env"
 
 
 class Settings(BaseSettings):
     """Global configuration settings for Ask Your Data backend."""
 
     model_config = SettingsConfigDict(
-        env_file=str(ENV_FILE_PATH),
+        env_file=(str(ROOT_ENV_FILE_PATH), str(ENV_FILE_PATH)),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -33,11 +42,11 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     COOKIE_SECURE: bool = False  # Set to True in production (HTTPS)
     COOKIE_SAMESITE: str = "lax"
-    AUTH_REQUIRED: bool = False  # Set to True to enforce mandatory login gate
+    AUTH_REQUIRED: bool = True  # Enforce mandatory authentication gate
 
-    # Metadata Database (PostgreSQL)
-    METADATA_DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/askyourdata"
-    METADATA_DATABASE_SYNC_URL: str = "postgresql://postgres:postgres@localhost:5432/askyourdata"
+    # Metadata Database (Default to local SQLite with aiosqlite for standalone dev)
+    METADATA_DATABASE_URL: str = DEFAULT_SQLITE_URL
+    METADATA_DATABASE_SYNC_URL: str = DEFAULT_SQLITE_SYNC_URL
 
     # Redis Cache & Broker
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -45,7 +54,7 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
 
     # DuckDB Internal Columnar Storage
-    DUCKDB_DATABASE_PATH: str = "/data/askyourdata.duckdb"
+    DUCKDB_DATABASE_PATH: str = DEFAULT_DUCKDB_PATH
 
     # CORS
     CORS_ORIGINS: Union[List[str], str] = [
@@ -59,17 +68,27 @@ class Settings(BaseSettings):
     def resolve_sqlite_url(cls, v: str) -> str:
         if "sqlite" in v and ":///" in v:
             prefix, path = v.split(":///", 1)
-            if path.startswith("."):
-                resolved = (BACKEND_DIR / path).resolve()
-                return f"{prefix}:///{resolved.as_posix()}"
+            path = path.replace("\\", "/")
+            if not os.path.isabs(path) and not (len(path) > 1 and path[1] == ":"):
+                clean_path = path.lstrip("./")
+                resolved = (BACKEND_DIR / clean_path).resolve()
+            else:
+                resolved = Path(path).resolve()
+            resolved.parent.mkdir(parents=True, exist_ok=True)
+            return f"{prefix}:///{resolved.as_posix()}"
         return v
 
     @field_validator("DUCKDB_DATABASE_PATH", mode="after")
     @classmethod
     def resolve_duckdb_path(cls, v: str) -> str:
-        if v.startswith("."):
-            return str((BACKEND_DIR / v).resolve())
-        return v
+        v = v.replace("\\", "/")
+        if not os.path.isabs(v) and not (len(v) > 1 and v[1] == ":"):
+            clean_path = v.lstrip("./")
+            resolved = (BACKEND_DIR / clean_path).resolve()
+        else:
+            resolved = Path(v).resolve()
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        return resolved.as_posix()
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
@@ -80,9 +99,28 @@ class Settings(BaseSettings):
             return v
         return ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"]
 
-    # Initial Admin Seed
+    # Super Administrator Configuration (environment-driven)
+    SUPERADMIN_EMAIL: str = "admin@askyourdata.local"
+    SUPERADMIN_PASSWORD: str = "admin123456"
+    SUPERADMIN_NAME: str = "Super Administrator"
+
+    # Backward compatibility aliases
     ADMIN_EMAIL: str = "admin@askyourdata.local"
     ADMIN_PASSWORD: str = "admin123456"
+
+    @model_validator(mode="after")
+    def harmonize_superadmin_credentials(self) -> "Settings":
+        # If SUPERADMIN_EMAIL was customized and ADMIN_EMAIL is default, sync them
+        if self.SUPERADMIN_EMAIL != "admin@askyourdata.local" and self.ADMIN_EMAIL == "admin@askyourdata.local":
+            self.ADMIN_EMAIL = self.SUPERADMIN_EMAIL
+        elif self.ADMIN_EMAIL != "admin@askyourdata.local" and self.SUPERADMIN_EMAIL == "admin@askyourdata.local":
+            self.SUPERADMIN_EMAIL = self.ADMIN_EMAIL
+
+        if self.SUPERADMIN_PASSWORD != "admin123456" and self.ADMIN_PASSWORD == "admin123456":
+            self.ADMIN_PASSWORD = self.SUPERADMIN_PASSWORD
+        elif self.ADMIN_PASSWORD != "admin123456" and self.SUPERADMIN_PASSWORD == "admin123456":
+            self.SUPERADMIN_PASSWORD = self.ADMIN_PASSWORD
+        return self
 
     # Limits and Guardrails
     MAX_UPLOAD_SIZE_MB: int = 200

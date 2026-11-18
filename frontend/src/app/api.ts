@@ -533,6 +533,7 @@ export interface GroundingDetail {
 export interface AIChatResponse {
   conversation_id: string;
   message_id: string;
+  result_id?: string;
   answer: string;
   sql?: string | null;
   columns: string[];
@@ -556,6 +557,23 @@ export interface AIChatResponse {
     elapsed_ms?: number;
   }>;
   latency_ms: number;
+}
+
+export interface AISnapshotItem {
+  id: string;
+  source_type: "ai_query_result";
+  message_id?: string;
+  dataset_id?: string;
+  dataset_name?: string;
+  question: string;
+  sql?: string;
+  columns: string[];
+  column_types: string[];
+  rows: any[][];
+  row_count: number;
+  duration_ms: number;
+  recommended_chart: Record<string, any>;
+  created_at?: string;
 }
 
 export interface SqlQueryResult {
@@ -677,6 +695,11 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers || {});
   if (!headers.has("Content-Type") && !(options.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
+  }
+
+  const token = localStorage.getItem("ayd_token");
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
   }
 
   const response = await fetch(url, {
@@ -879,7 +902,13 @@ export const api = {
 
   // AI Assistant
   getAIStatus: () => request<AIStatus>("/api/v1/ai/status"),
-  askAI: (data: { prompt: string; conversation_id?: string; dataset_id?: string; database_id?: string }) =>
+  askAI: (data: {
+    prompt: string;
+    conversation_id?: string;
+    dataset_id?: string;
+    database_id?: string;
+    dashboard_id?: string;
+  }) =>
     request<AIChatResponse>("/api/v1/ai/chat", {
       method: "POST",
       body: JSON.stringify(data),
@@ -887,6 +916,24 @@ export const api = {
   getAIConversations: () => request<Array<{ id: string; title: string; created_at: string }>>("/api/v1/ai/conversations"),
   getAIConversationMessages: (conversationId: string) =>
     request<any[]>(`/api/v1/ai/conversations/${conversationId}/messages`),
+  createAISnapshot: (data: {
+    message_id?: string;
+    dataset_id?: string;
+    dataset_name?: string;
+    question: string;
+    sql?: string;
+    columns: string[];
+    column_types?: string[];
+    rows: any[][];
+    row_count: number;
+    duration_ms?: number;
+    recommended_chart?: any;
+  }) =>
+    request<AISnapshotItem>("/api/v1/ai/snapshots", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  getAISnapshot: (id: string) => request<AISnapshotItem>(`/api/v1/ai/snapshots/${id}`),
 
   // API Connect
   getApiConnections: () => request<ApiConnection[]>("/api/v1/api-connect/connections"),
@@ -967,4 +1014,65 @@ export const api = {
     }),
   getApiTableSyncRuns: (id: string) =>
     request<ApiSyncRun[]>(`/api/v1/api-connect/tables/${id}/runs`),
+
+  // Super Admin Control Panel API
+  getAdminDashboard: () => request<AdminDashboardStats>("/api/v1/admin/dashboard"),
+  getAdminUsers: (params?: { search?: string; status?: string; limit?: number; offset?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.search) searchParams.set("search", params.search);
+    if (params?.status && params.status !== "all") searchParams.set("status", params.status);
+    if (params?.limit) searchParams.set("limit", String(params.limit));
+    if (params?.offset) searchParams.set("offset", String(params.offset));
+    const qs = searchParams.toString();
+    return request<{ total: number; users: AdminUser[] }>(`/api/v1/admin/users${qs ? `?${qs}` : ""}`);
+  },
+  getAdminUserDetails: (id: string) => request<AdminUser>(`/api/v1/admin/users/${id}`),
+  updateUserStatus: (id: string, is_active: boolean) =>
+    request<AdminUser>(`/api/v1/admin/users/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_active }),
+    }),
+  deleteUser: (id: string) =>
+    request<{ message: string }>(`/api/v1/admin/users/${id}`, {
+      method: "DELETE",
+    }),
+  getAdminDatasets: () => request<AdminDataset[]>("/api/v1/admin/datasets"),
 };
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  full_name: string;
+  role: string;
+  is_active: boolean;
+  is_superuser: boolean;
+  is_verified: boolean;
+  created_at: string;
+  last_login?: string | null;
+  dataset_count: number;
+  chart_count: number;
+}
+
+export interface AdminDashboardStats {
+  total_users: number;
+  active_users: number;
+  inactive_users: number;
+  total_datasets: number;
+  total_charts: number;
+  recent_registrations: AdminUser[];
+  system_status: Record<string, any>;
+}
+
+export interface AdminDataset {
+  id: string;
+  name: string;
+  description?: string;
+  database_name: string;
+  table_name?: string;
+  schema_name?: string;
+  is_virtual: boolean;
+  owner_email?: string;
+  owner_name?: string;
+  created_at: string;
+  column_count: number;
+}

@@ -10,13 +10,22 @@ if backend_dir not in sys.path:
 
 from sqlalchemy import select, delete
 from app.core.config import settings
+from app.db.base import Base
+from app.db.init_db import init_system_data
 from app.db.models import User, Dataset, Chart, Dashboard, DashboardChart, DashboardFilter
-from app.db.session import AsyncSessionLocal
+from app.db.session import AsyncSessionLocal, async_engine
 from scripts.seed_demo_data import main as seed_demo_data_main
 
 
 async def seed_demo_dashboard() -> None:
     print("--- Seeding Demo Charts & Executive Dashboard ---")
+
+    # Ensure tables exist and system roles/admin are initialized
+    async with async_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with AsyncSessionLocal() as session:
+        await init_system_data(session)
 
     async with AsyncSessionLocal() as session:
         # 1. Fetch Admin User
