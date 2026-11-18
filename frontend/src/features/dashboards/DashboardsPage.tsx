@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Layers,
   Plus,
@@ -197,6 +197,10 @@ const DashboardChartTile: React.FC<{
 
 export const DashboardsPage: React.FC = () => {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const { slug } = useParams<{ slug?: string }>();
+  const [searchParams] = useSearchParams();
+  const targetSlugOrId = slug || searchParams.get("slug") || searchParams.get("id");
 
   // Mode: "list" or "view"
   const [mode, setMode] = useState<"list" | "view">("list");
@@ -233,6 +237,22 @@ export const DashboardsPage: React.FC = () => {
     : (allCharts as any)?.data || [];
 
   const activeDashboard = dashboardList.find((d) => d.id === activeDashboardId);
+
+  // URL sync for /dashboards/:slug or ?slug=... or ?id=...
+  useEffect(() => {
+    if (!targetSlugOrId || dashboardList.length === 0) return;
+    const match = dashboardList.find(
+      (d) => d.slug === targetSlugOrId || d.id === targetSlugOrId
+    );
+    if (match) {
+      setActiveDashboardId(match.id);
+      setIsEditMode(false);
+      setActiveFilters({});
+      setMode("view");
+    } else if (!isLoadingDashboards) {
+      refetchDashboards();
+    }
+  }, [targetSlugOrId, dashboardList, isLoadingDashboards, refetchDashboards]);
 
   // Auto refresh timer
   useEffect(() => {
@@ -287,6 +307,7 @@ export const DashboardsPage: React.FC = () => {
     setIsEditMode(false);
     setActiveFilters({});
     setMode("view");
+    navigate(`/dashboards/${dash.slug || dash.id}`);
   };
 
   const handleAddChartToDashboard = (chartId: string) => {
@@ -436,7 +457,11 @@ export const DashboardsPage: React.FC = () => {
           <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <button
-                onClick={() => setMode("list")}
+                onClick={() => {
+                  setMode("list");
+                  setActiveDashboardId(null);
+                  navigate("/dashboards");
+                }}
                 className="inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 font-medium px-2 py-1 rounded hover:bg-slate-100 transition"
               >
                 <ChevronLeft className="w-4 h-4" />

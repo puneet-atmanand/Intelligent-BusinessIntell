@@ -249,7 +249,7 @@ export const DatabasesPage: React.FC = () => {
           table_name: r.table,
           status: (r.status as any) || "created",
           dataset_id: r.dataset_id,
-          dashboard_slug: r.dashboard_slug,
+          dashboard_slug: r.dashboard_slug || res.unified_dashboard_slug,
           error: r.error,
         })),
       };

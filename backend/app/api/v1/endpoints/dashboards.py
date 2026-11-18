@@ -3,7 +3,7 @@ import re
 import uuid
 from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, status
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -134,15 +134,26 @@ async def create_dashboard(
 
 @router.get("/{id}", response_model=DashboardOut)
 async def get_dashboard(
-    id: uuid.UUID,
+    id: str,
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(require_permission("dashboards:read")),
 ) -> Any:
-    """Get dashboard with placed charts and native filters."""
+    """Get dashboard with placed charts and native filters by UUID or slug."""
+    parsed_uuid = None
+    try:
+        parsed_uuid = uuid.UUID(id)
+    except ValueError:
+        pass
+
+    if parsed_uuid:
+        condition = or_(Dashboard.id == parsed_uuid, Dashboard.slug == id)
+    else:
+        condition = (Dashboard.slug == id)
+
     stmt = (
         select(Dashboard)
         .options(selectinload(Dashboard.charts), selectinload(Dashboard.filters))
-        .where(Dashboard.id == id, Dashboard.deleted_at.is_(None))
+        .where(condition, Dashboard.deleted_at.is_(None))
     )
     result = await session.execute(stmt)
     dashboard = result.scalar_one_or_none()

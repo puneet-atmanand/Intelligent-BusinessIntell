@@ -187,3 +187,42 @@ async def test_auto_visualize_api_endpoint(client: AsyncClient, db_session: Asyn
     assert data["charts_count"] > 0
     assert len(data["per_table_dashboards"]) == 1
     assert data["per_table_dashboards"][0]["table"] == "items"
+
+
+@pytest.mark.asyncio
+async def test_auto_visualize_unified_only_endpoint(client: AsyncClient, db_session: AsyncSession, test_db_conn: DatabaseConnection):
+    """Test POST /api/v1/databases/{id}/auto-visualize with unified_dashboard=True and per_table_dashboards=False."""
+    dataset = Dataset(
+        name="inventory",
+        table_name="inventory",
+        schema_name="main",
+        database_id=test_db_conn.id,
+        is_virtual=False,
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    db_session.add(DatasetColumn(dataset_id=dataset.id, name="prod_id", data_type="INTEGER", is_dimension=True))
+    db_session.add(DatasetColumn(dataset_id=dataset.id, name="qty", data_type="INTEGER", is_dimension=False))
+    await db_session.commit()
+
+    payload = {
+        "tables": [{"schema_name": "main", "table_name": "inventory"}],
+        "per_table_dashboards": False,
+        "unified_dashboard": True,
+    }
+
+    response = await client.post(
+        f"/api/v1/databases/{test_db_conn.id}/auto-visualize",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["database_id"] == str(test_db_conn.id)
+    assert data["unified_dashboard_slug"] is not None
+    assert data["per_table_dashboards_created"] == 1
+    assert len(data["per_table_dashboards"]) == 1
+    assert data["per_table_dashboards"][0]["table"] == "inventory"
+    assert data["per_table_dashboards"][0]["status"] == "created"
+    assert data["per_table_dashboards"][0]["dashboard_slug"] == data["unified_dashboard_slug"]

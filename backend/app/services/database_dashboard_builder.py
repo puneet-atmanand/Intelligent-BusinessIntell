@@ -1066,6 +1066,20 @@ async def build_unified_database_dashboard(
     )
     logger.info(summary)
 
+    # When per_table_dashboards is False (Unified dashboard only mode),
+    # populate per_table_results so frontend receives all visualized tables and their created datasets
+    if not per_table_dashboards:
+        for (s_name, t_name), ds in table_datasets.items():
+            per_table_results.append({
+                "schema": s_name,
+                "table": t_name,
+                "dashboard_slug": dashboard.slug,
+                "title": f"{dashboard.title} ({s_name}.{t_name})",
+                "status": "created",
+                "dataset_id": str(ds.id),
+                "error": None,
+            })
+
     return {
         "database_id": db_conn.id,
         "database_name": db_conn.name,
