@@ -480,7 +480,13 @@ async def build_unified_database_dashboard(
         session.add(dashboard)
         await session.flush()
 
-    count_metric = {"name": "count", "label": "Total Records", "expression": "COUNT(*)"}
+    count_metric = {
+        "name": "count",
+        "label": "Total Records",
+        "expression": "COUNT(*)",
+        "column": "count",
+        "agg": "COUNT",
+    }
 
     # Grid builder helpers
     grid_charts: List[Tuple[Dict[str, Any], int, int]] = []  # (spec, width, height)
@@ -519,7 +525,18 @@ async def build_unified_database_dashboard(
             "dataset_id": overview_ds.id,
             "params": {
                 "dimensions": [],
-                "metrics": [{"name": "total_schemas", "label": "Schemas", "expression": "COUNT(DISTINCT schema_name)"}],
+                "primary_metric_col": "schema_name",
+                "primary_metric_agg": "COUNT_DISTINCT",
+                "metrics": [
+                    {
+                        "name": "total_schemas",
+                        "label": "Schemas",
+                        "expression": "COUNT(DISTINCT schema_name)",
+                        "column": "schema_name",
+                        "agg": "COUNT_DISTINCT",
+                    }
+                ],
+                "metrics_config": [{"id": "m-0", "column": "schema_name", "agg": "COUNT_DISTINCT"}],
                 "row_limit": 1,
             },
         },
@@ -533,7 +550,18 @@ async def build_unified_database_dashboard(
             "dataset_id": overview_ds.id,
             "params": {
                 "dimensions": [],
-                "metrics": [{"name": "total_tables", "label": "Tables", "expression": "COUNT(*)"}],
+                "primary_metric_col": "count",
+                "primary_metric_agg": "COUNT",
+                "metrics": [
+                    {
+                        "name": "total_tables",
+                        "label": "Tables",
+                        "expression": "COUNT(*)",
+                        "column": "count",
+                        "agg": "COUNT",
+                    }
+                ],
+                "metrics_config": [{"id": "m-0", "column": "count", "agg": "COUNT"}],
                 "row_limit": 1,
             },
         },
@@ -547,7 +575,18 @@ async def build_unified_database_dashboard(
             "dataset_id": overview_ds.id,
             "params": {
                 "dimensions": [],
-                "metrics": [{"name": "total_rows", "label": "Total Rows", "expression": "SUM(row_count)"}],
+                "primary_metric_col": "row_count",
+                "primary_metric_agg": "SUM",
+                "metrics": [
+                    {
+                        "name": "total_rows",
+                        "label": "Total Rows",
+                        "expression": "SUM(row_count)",
+                        "column": "row_count",
+                        "agg": "SUM",
+                    }
+                ],
+                "metrics_config": [{"id": "m-0", "column": "row_count", "agg": "SUM"}],
                 "row_limit": 1,
             },
         },
@@ -561,7 +600,18 @@ async def build_unified_database_dashboard(
             "dataset_id": overview_ds.id,
             "params": {
                 "dimensions": [],
-                "metrics": [{"name": "total_cols", "label": "Total Columns", "expression": "SUM(column_count)"}],
+                "primary_metric_col": "column_count",
+                "primary_metric_agg": "SUM",
+                "metrics": [
+                    {
+                        "name": "total_cols",
+                        "label": "Total Columns",
+                        "expression": "SUM(column_count)",
+                        "column": "column_count",
+                        "agg": "SUM",
+                    }
+                ],
+                "metrics_config": [{"id": "m-0", "column": "column_count", "agg": "SUM"}],
                 "row_limit": 1,
             },
         },
@@ -577,7 +627,18 @@ async def build_unified_database_dashboard(
             "dataset_id": overview_ds.id,
             "params": {
                 "dimensions": ["full_table_name"],
-                "metrics": [{"name": "row_count", "label": "Rows", "expression": "SUM(row_count)"}],
+                "primary_metric_col": "row_count",
+                "primary_metric_agg": "SUM",
+                "metrics": [
+                    {
+                        "name": "row_count",
+                        "label": "Rows",
+                        "expression": "SUM(row_count)",
+                        "column": "row_count",
+                        "agg": "SUM",
+                    }
+                ],
+                "metrics_config": [{"id": "m-0", "column": "row_count", "agg": "SUM"}],
                 "row_limit": 50,
             },
         },
@@ -677,13 +738,18 @@ async def build_unified_database_dashboard(
                         "dataset_id": ds.id,
                         "params": {
                             "dimensions": [],
+                            "primary_metric_col": c.name,
+                            "primary_metric_agg": "COUNT_DISTINCT",
                             "metrics": [
                                 {
                                     "name": f"dist_{c.name}",
                                     "label": f"Distinct {col_label}",
                                     "expression": f"COUNT(DISTINCT {safe_col})",
+                                    "column": c.name,
+                                    "agg": "COUNT_DISTINCT",
                                 }
                             ],
+                            "metrics_config": [{"id": "m-0", "column": c.name, "agg": "COUNT_DISTINCT"}],
                             "row_limit": 1,
                             "options": {"subheader": sub_text},
                         },
@@ -807,13 +873,18 @@ async def build_unified_database_dashboard(
                         "dataset_id": ds.id,
                         "params": {
                             "dimensions": [],
+                            "primary_metric_col": c.name,
+                            "primary_metric_agg": "AVG",
                             "metrics": [
                                 {
                                     "name": f"avg_{c.name}",
                                     "label": f"AVG({col_label})",
                                     "expression": f"AVG({safe_col})",
+                                    "column": c.name,
+                                    "agg": "AVG",
                                 }
                             ],
+                            "metrics_config": [{"id": "m-0", "column": c.name, "agg": "AVG"}],
                             "row_limit": 1,
                             "options": {"subheader": sub_info},
                         },
@@ -873,13 +944,18 @@ async def build_unified_database_dashboard(
                     "dataset_id": ds.id,
                     "params": {
                         "dimensions": [],
+                        "primary_metric_col": c.name,
+                        "primary_metric_agg": "COUNT_DISTINCT",
                         "metrics": [
                             {
                                 "name": f"dist_{c.name}",
                                 "label": f"Distinct {col_label}",
                                 "expression": f"COUNT(DISTINCT {safe_col})",
+                                "column": c.name,
+                                "agg": "COUNT_DISTINCT",
                             }
                         ],
+                        "metrics_config": [{"id": "m-0", "column": c.name, "agg": "COUNT_DISTINCT"}],
                         "row_limit": 1,
                         "options": {"subheader": sub_text},
                     },
@@ -921,13 +997,18 @@ async def build_unified_database_dashboard(
                         "dataset_id": ds.id,
                         "params": {
                             "dimensions": [best_dim.name],
+                            "primary_metric_col": m_col.name,
+                            "primary_metric_agg": "AVG",
                             "metrics": [
                                 {
                                     "name": f"avg_{m_col.name}",
                                     "label": f"AVG({m_label})",
                                     "expression": f"AVG({quote_identifier(m_col.name)})",
+                                    "column": m_col.name,
+                                    "agg": "AVG",
                                 }
                             ],
+                            "metrics_config": [{"id": "m-0", "column": m_col.name, "agg": "AVG"}],
                             "row_limit": 25,
                         },
                     },

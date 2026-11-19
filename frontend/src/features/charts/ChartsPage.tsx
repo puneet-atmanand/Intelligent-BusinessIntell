@@ -16,137 +16,8 @@ import {
 } from "lucide-react";
 import { api, ChartItem, DatasetItem, ChartDataResponse, AISnapshotItem } from "@/app/api";
 import { chartRegistry, ChartPlugin } from "@/charts";
-import { isTemporalColumn, isNumericColumn } from "./utils";
+import { isTemporalColumn, isNumericColumn, parseMetricExpression } from "./utils";
 import { AIDrawer } from "@/features/ai/AIDrawer";
-
-/**
- * Robustly parse existing metric configuration objects into valid column + aggregation pairs,
- * preventing derived aliases like "avg_credits" from being treated as physical column names.
- */
-function parseMetricItem(
-  m: any,
-  idx: number,
-  datasetCols: any[]
-): { id: string; column: string; agg: string } {
-  if (!m) {
-    return { id: `m-${idx}`, column: "count", agg: "COUNT" };
-  }
-
-  // 1. Direct match when column exists in datasetCols
-  if (m.column && m.column !== "avg_credits" && m.column !== "sum_credits") {
-    if (m.column === "count") {
-      return { id: m.id || `m-${idx}`, column: "count", agg: "COUNT" };
-    }
-    const direct = datasetCols.find(
-      (c) => (c.column_name || c.name || "").toLowerCase() === String(m.column).toLowerCase()
-    );
-    if (direct) {
-      return {
-        id: m.id || `m-${idx}`,
-        column: direct.column_name || direct.name,
-        agg: (m.agg || "SUM").toUpperCase(),
-      };
-    }
-  }
-
-  // 2. Parse from expression e.g. AVG(credits), SUM("credits"), COUNT(*)
-  const expr = (m.expression || m.sql_expression || "").trim();
-  if (expr) {
-    if (expr.toUpperCase() === "COUNT(*)") {
-      return { id: m.id || `m-${idx}`, column: "count", agg: "COUNT" };
-    }
-    const match = expr.match(/^([a-zA-Z_]+)\(\s*(?:DISTINCT\s+)?["'`]?([^"')`]+)["'`]?\s*\)$/i);
-    if (match) {
-      let agg = match[1].toUpperCase();
-      if (expr.toUpperCase().includes("DISTINCT")) {
-        agg = "COUNT_DISTINCT";
-      }
-      const rawCol = match[2].trim();
-      const matched = datasetCols.find(
-        (c) => (c.column_name || c.name || "").toLowerCase() === rawCol.toLowerCase()
-      );
-      if (matched) {
-        return { id: m.id || `m-${idx}`, column: matched.column_name || matched.name, agg };
-      }
-      for (const pfx of ["avg_", "sum_", "min_", "max_", "count_"]) {
-        if (rawCol.toLowerCase().startsWith(pfx)) {
-          const rem = rawCol.toLowerCase().slice(pfx.length);
-          const remMatch = datasetCols.find(
-            (c) => (c.column_name || c.name || "").toLowerCase() === rem
-          );
-          if (remMatch) {
-            return {
-              id: m.id || `m-${idx}`,
-              column: remMatch.column_name || remMatch.name,
-              agg: agg || pfx.replace("_", "").toUpperCase(),
-            };
-          }
-        }
-      }
-      return { id: m.id || `m-${idx}`, column: rawCol, agg };
-    }
-  }
-
-  // 3. Check m.column if it carried a prefix alias like avg_credits
-  if (m.column) {
-    const colLower = String(m.column).toLowerCase();
-    for (const pfx of ["avg_", "sum_", "min_", "max_", "count_"]) {
-      if (colLower.startsWith(pfx)) {
-        const rem = colLower.slice(pfx.length);
-        const remMatch = datasetCols.find(
-          (c) => (c.column_name || c.name || "").toLowerCase() === rem
-        );
-        if (remMatch) {
-          return {
-            id: m.id || `m-${idx}`,
-            column: remMatch.column_name || remMatch.name,
-            agg: pfx.replace("_", "").toUpperCase(),
-          };
-        }
-      }
-    }
-  }
-
-  // 4. Check m.name
-  const rawName = (m.name || m.label || "").trim();
-  if (rawName.toLowerCase() === "count" || rawName.toLowerCase() === "total_rows") {
-    return { id: m.id || `m-${idx}`, column: "count", agg: "COUNT" };
-  }
-  const nameLower = rawName.toLowerCase();
-  for (const pfx of ["avg_", "sum_", "min_", "max_", "count_"]) {
-    if (nameLower.startsWith(pfx)) {
-      const rem = nameLower.slice(pfx.length);
-      const remMatch = datasetCols.find(
-        (c) => (c.column_name || c.name || "").toLowerCase() === rem
-      );
-      if (remMatch) {
-        return {
-          id: m.id || `m-${idx}`,
-          column: remMatch.column_name || remMatch.name,
-          agg: pfx.replace("_", "").toUpperCase(),
-        };
-      }
-    }
-  }
-
-  // 5. Direct name match
-  const nameMatch = datasetCols.find(
-    (c) => (c.column_name || c.name || "").toLowerCase() === nameLower
-  );
-  if (nameMatch) {
-    return {
-      id: m.id || `m-${idx}`,
-      column: nameMatch.column_name || nameMatch.name,
-      agg: (m.agg || "SUM").toUpperCase(),
-    };
-  }
-
-  return {
-    id: m.id || `m-${idx}`,
-    column: m.column || rawName || "count",
-    agg: (m.agg || "SUM").toUpperCase(),
-  };
-}
 
 /**
  * Projects and formats AI Query Result rows to match the user's selected dimensions, metrics,
@@ -646,42 +517,40 @@ export const ChartsPage: React.FC = () => {
             agg: "EXPR",
           });
         } else {
-          // Resolve real physical column name
-          let actualCol = m.column;
-          const foundCol = currentColumns.find(
-            (c) => (c.column_name || c.name || "").toLowerCase() === actualCol.toLowerCase()
-          );
-          if (foundCol) {
-            actualCol = foundCol.column_name || foundCol.name;
-          } else {
-            for (const pfx of ["avg_", "sum_", "min_", "max_", "count_"]) {
-              if (actualCol.toLowerCase().startsWith(pfx)) {
-                const rem = actualCol.toLowerCase().slice(pfx.length);
-                const matched = currentColumns.find(
-                  (c) => (c.column_name || c.name || "").toLowerCase() === rem
-                );
-                if (matched) {
-                  actualCol = matched.column_name || matched.name;
-                  break;
-                }
-              }
+          const resolved = parseMetricExpression(m, currentColumns);
+          let validCol = resolved.column;
+          if (validCol !== "count") {
+            const matchedCol = currentColumns.find(
+              (c) => (c.column_name || c.name || "").toLowerCase() === validCol.toLowerCase()
+            );
+            if (matchedCol) {
+              validCol = matchedCol.column_name || matchedCol.name;
             }
           }
-
-          const agg = (m.agg || "SUM").toUpperCase();
-          const expr =
-            agg === "COUNT_DISTINCT"
-              ? `COUNT(DISTINCT "${actualCol}")`
-              : `${agg}("${actualCol}")`;
-          const mName = `${agg.toLowerCase()}_${actualCol}`;
-          const label = `${agg}(${actualCol})`;
-          list.push({
-            name: mName,
-            label,
-            expression: expr,
-            column: actualCol,
-            agg,
-          });
+          const agg = (resolved.agg || m.agg || "SUM").toUpperCase();
+          if (validCol === "count") {
+            list.push({
+              name: "count",
+              label: "Count of Rows",
+              expression: "COUNT(*)",
+              column: "count",
+              agg: "COUNT",
+            });
+          } else {
+            const expr =
+              agg === "COUNT_DISTINCT"
+                ? `COUNT(DISTINCT "${validCol}")`
+                : `${agg}("${validCol}")`;
+            const mName = `${agg.toLowerCase()}_${validCol}`;
+            const label = `${agg}(${validCol})`;
+            list.push({
+              name: mName,
+              label,
+              expression: expr,
+              column: validCol,
+              agg,
+            });
+          }
         }
       }
     }
@@ -942,8 +811,8 @@ export const ChartsPage: React.FC = () => {
       setSelectedDimension(dims[0] || "");
       setSelectedDimensions(dims);
 
-      const targetDs = effectiveDatasetList.find((d) => d.id === chartToEdit.dataset_id);
-      const colsForParsing = targetDs?.columns || [];
+      const targetDs = (effectiveDatasetList || datasetList).find((d: any) => d.id === chartToEdit.dataset_id);
+      const targetCols = targetDs?.columns || [];
 
       if (p.source_type === "ai_query_result" && p.cached_query_result) {
         setWorkspaceSourceType("AI_QUERY_RESULT");
@@ -968,20 +837,39 @@ export const ChartsPage: React.FC = () => {
       }
 
       if (p.metrics_config && Array.isArray(p.metrics_config) && p.metrics_config.length > 0) {
-        const parsedList = p.metrics_config.map((mc: any, idx: number) => parseMetricItem(mc, idx, colsForParsing));
-        setMetricsList(parsedList);
-        setPrimaryMetricCol(parsedList[0]?.column || "count");
-        setPrimaryMetricAgg(parsedList[0]?.agg || "COUNT");
+        const resolvedList = p.metrics_config.map((mc: any, idx: number) => {
+          const parsed = parseMetricExpression(mc, targetCols);
+          return {
+            id: mc.id || `m-${idx}`,
+            column: parsed.column,
+            agg: parsed.agg,
+          };
+        });
+        setMetricsList(resolvedList);
+        setPrimaryMetricCol(resolvedList[0]?.column || "count");
+        setPrimaryMetricAgg(resolvedList[0]?.agg || "COUNT");
       } else if (p.metrics && p.metrics.length > 0) {
-        const mappedList = p.metrics.map((m: any, idx: number) => parseMetricItem(m, idx, colsForParsing));
+        const mappedList = p.metrics.map((m: any, idx: number) => {
+          const parsed = parseMetricExpression(m, targetCols);
+          return {
+            id: `m-${idx}`,
+            column: parsed.column,
+            agg: parsed.agg,
+          };
+        });
         setMetricsList(mappedList);
         setPrimaryMetricCol(mappedList[0]?.column || "count");
         setPrimaryMetricAgg(mappedList[0]?.agg || "COUNT");
       } else if (p.primary_metric_col) {
-        const parsed = parseMetricItem({ column: p.primary_metric_col, agg: p.primary_metric_agg || "SUM" }, 0, colsForParsing);
+        const parsed = parseMetricExpression(
+          { column: p.primary_metric_col, agg: p.primary_metric_agg },
+          targetCols
+        );
         setPrimaryMetricCol(parsed.column);
         setPrimaryMetricAgg(parsed.agg);
-        setMetricsList([parsed]);
+        setMetricsList([
+          { id: "m-0", column: parsed.column, agg: parsed.agg },
+        ]);
       } else {
         setPrimaryMetricCol("count");
         setPrimaryMetricAgg("COUNT");
