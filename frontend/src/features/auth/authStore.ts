@@ -144,7 +144,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       const data = await response.json();
 
       if (!response.ok) {
-        let errorMsg = data.message || data.detail || "Access denied. Invalid administrator credentials.";
+        const errorMsg = data.message || data.detail || "Access denied. Invalid administrator credentials.";
         set({ error: errorMsg, isLoading: false });
         return false;
       }

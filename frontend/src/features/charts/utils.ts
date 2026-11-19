@@ -40,9 +40,24 @@ export const parseMetricExpression = (
     datasetColumns.map((c: any) => c.column_name || c.name).filter(Boolean)
   );
 
+  const sanitizeAggForCol = (colName: string, requestedAgg: string): string => {
+    if (colName === "count") return "COUNT";
+    const colObj = datasetColumns.find((c: any) => (c.column_name || c.name) === colName);
+    if (colObj && !isNumericColumn(colObj)) {
+      const upper = (requestedAgg || "").toUpperCase();
+      if (upper === "SUM" || upper === "AVG") {
+        return "COUNT_DISTINCT";
+      }
+    }
+    return requestedAgg || "SUM";
+  };
+
   // If m already explicitly has a valid column name
   if (m?.column && (validColNames.has(m.column) || m.column === "count")) {
-    return { column: m.column, agg: m.agg || "SUM" };
+    return {
+      column: m.column,
+      agg: sanitizeAggForCol(m.column, m.agg || (m.column === "count" ? "COUNT" : "SUM")),
+    };
   }
 
   const expr = (m?.expression || m?.sql_expression || "").trim();
@@ -57,7 +72,7 @@ export const parseMetricExpression = (
     if (distMatch && distMatch[1]) {
       const col = distMatch[1];
       if (validColNames.has(col) || validColNames.size === 0) {
-        return { column: col, agg: "COUNT_DISTINCT" };
+        return { column: col, agg: sanitizeAggForCol(col, "COUNT_DISTINCT") };
       }
     }
     const aggMatch = expr.match(/^(SUM|AVG|MIN|MAX|COUNT)\s*\(\s*["`[]?([a-zA-Z0-9_]+)["`\]]?\s*\)$/i);
@@ -65,7 +80,7 @@ export const parseMetricExpression = (
       const foundAgg = aggMatch[1].toUpperCase();
       const col = aggMatch[2];
       if (validColNames.has(col) || validColNames.size === 0) {
-        return { column: col, agg: foundAgg };
+        return { column: col, agg: sanitizeAggForCol(col, foundAgg) };
       }
     }
   }
@@ -93,29 +108,30 @@ export const parseMetricExpression = (
     if (name.startsWith("avg_")) {
       const stripped = name.slice(4);
       if (validColNames.has(stripped)) {
-        return { column: stripped, agg: "AVG" };
+        return { column: stripped, agg: sanitizeAggForCol(stripped, "AVG") };
       }
     }
     if (name.startsWith("sum_")) {
       const stripped = name.slice(4);
       if (validColNames.has(stripped)) {
-        return { column: stripped, agg: "SUM" };
+        return { column: stripped, agg: sanitizeAggForCol(stripped, "SUM") };
       }
     }
     if (validColNames.has(name)) {
-      return { column: name, agg: m?.agg || "SUM" };
+      return { column: name, agg: sanitizeAggForCol(name, m?.agg || "SUM") };
     }
   }
 
   // 3. Fallback: if m.column is set and is valid
   if (m?.column && validColNames.has(m.column)) {
-    return { column: m.column, agg: m.agg || "SUM" };
+    return { column: m.column, agg: sanitizeAggForCol(m.column, m.agg || "SUM") };
   }
 
   // 4. Fallback: if there are numeric columns, use the first numeric column
   const firstNum = datasetColumns.find(isNumericColumn);
   if (firstNum) {
-    return { column: firstNum.column_name || firstNum.name, agg: "SUM" };
+    const col = firstNum.column_name || firstNum.name;
+    return { column: col, agg: "SUM" };
   }
 
   return { column: "count", agg: "COUNT" };

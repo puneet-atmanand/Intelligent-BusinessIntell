@@ -5,6 +5,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Chart, Dashboard, DashboardChart, Dataset, DatasetColumn, User
+from app.query.chart_query_builder import quote_identifier
 
 NUMERIC_TYPES = ("INT", "DOUBLE", "FLOAT", "DECIMAL", "NUMERIC")
 ID_LIKE_NAMES = {"id", "no", "sl_no", "sl_number", "row_id", "index", "code", "key"}
