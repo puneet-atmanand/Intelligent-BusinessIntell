@@ -43,9 +43,14 @@ export const ChartsPage: React.FC = () => {
     queryFn: api.getDashboards,
   });
 
-  const chartList: ChartItem[] = Array.isArray(charts)
-    ? (charts as ChartItem[])
-    : (charts as any)?.data || [];
+  const chartList: ChartItem[] = useMemo(() => {
+    const raw = Array.isArray(charts)
+      ? (charts as ChartItem[])
+      : (charts as any)?.data || [];
+    return raw.filter(
+      (c: ChartItem) => c.viz_type !== "header" && !(c.params as any)?.is_section_header
+    );
+  }, [charts]);
   const datasetList: DatasetItem[] = Array.isArray(datasets)
     ? (datasets as DatasetItem[])
     : (datasets as any)?.data || [];
@@ -421,7 +426,11 @@ export const ChartsPage: React.FC = () => {
       setChartTitle(chartToEdit.title);
       setChartDescription(chartToEdit.description || "");
       setSelectedDatasetId(chartToEdit.dataset_id);
-      setSelectedVizType(chartToEdit.viz_type);
+      const safeVizType =
+        !chartToEdit.viz_type || chartToEdit.viz_type === "header"
+          ? "bar"
+          : chartToEdit.viz_type;
+      setSelectedVizType(safeVizType);
       const p = chartToEdit.params || {};
 
       const dims = p.dimensions || (p.dimension ? [p.dimension] : []);
@@ -935,42 +944,81 @@ export const ChartsPage: React.FC = () => {
                 </div>
 
                 <div className="space-y-2">
-                  {metricsList.map((m, idx) => (
-                    <div key={m.id || idx} className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 space-y-1.5">
-                      <div className="flex gap-1.5 items-center">
-                        <select
-                          value={m.agg}
-                          onChange={(e) => {
-                            const updated = [...metricsList];
-                            updated[idx] = { ...updated[idx], agg: e.target.value };
-                            setMetricsList(updated);
-                            if (idx === 0) setPrimaryMetricAgg(e.target.value);
-                          }}
-                          disabled={m.column === "count"}
-                          className="w-24 px-1.5 py-1 text-xs border border-slate-300 rounded bg-white font-mono font-semibold text-blue-800 disabled:opacity-50"
-                        >
-                          <option value="SUM">SUM</option>
-                          <option value="AVG">AVG</option>
-                          <option value="MIN">MIN</option>
-                          <option value="MAX">MAX</option>
-                          <option value="COUNT">COUNT</option>
-                          <option value="COUNT_DISTINCT">DIST</option>
-                        </select>
+                  {metricsList.map((m, idx) => {
+                    const colObj = currentColumns.find((c) => (c.column_name || c.name) === m.column);
+                    const isColNumeric = m.column !== "count" && colObj ? isNumericColumn(colObj) : false;
 
-                        <select
-                          value={m.column}
-                          onChange={(e) => {
-                            const updated = [...metricsList];
-                            updated[idx] = { ...updated[idx], column: e.target.value };
-                            setMetricsList(updated);
-                            if (idx === 0) setPrimaryMetricCol(e.target.value);
-                          }}
-                          className="flex-1 min-w-0 px-2 py-1 text-xs border border-slate-300 rounded bg-white font-medium text-slate-800"
-                        >
-                          <option value="count">Count of Rows (COUNT(*))</option>
-                          {numericColumns.length > 0 && (
-                            <optgroup label="Numeric Measures">
-                              {numericColumns.map((c) => {
+                    return (
+                      <div key={m.id || idx} className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 space-y-1.5">
+                        <div className="flex gap-1.5 items-center">
+                          <select
+                            value={m.agg}
+                            onChange={(e) => {
+                              const updated = [...metricsList];
+                              updated[idx] = { ...updated[idx], agg: e.target.value };
+                              setMetricsList(updated);
+                              if (idx === 0) setPrimaryMetricAgg(e.target.value);
+                            }}
+                            disabled={m.column === "count"}
+                            className="w-24 px-1.5 py-1 text-xs border border-slate-300 rounded bg-white font-mono font-semibold text-blue-800 disabled:opacity-50"
+                          >
+                            <option value="SUM" disabled={m.column !== "count" && !isColNumeric}>
+                              SUM{m.column !== "count" && !isColNumeric ? " (num only)" : ""}
+                            </option>
+                            <option value="AVG" disabled={m.column !== "count" && !isColNumeric}>
+                              AVG{m.column !== "count" && !isColNumeric ? " (num only)" : ""}
+                            </option>
+                            <option value="MIN">MIN</option>
+                            <option value="MAX">MAX</option>
+                            <option value="COUNT">COUNT</option>
+                            <option value="COUNT_DISTINCT">DIST</option>
+                          </select>
+
+                          <select
+                            value={m.column}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              const isCount = val === "count";
+                              const selectedCol = currentColumns.find((c) => (c.column_name || c.name) === val);
+                              const isNum = selectedCol ? isNumericColumn(selectedCol) : false;
+
+                              let nextAgg = m.agg;
+                              if (isCount) {
+                                nextAgg = "COUNT";
+                              } else if (!isNum) {
+                                if (nextAgg === "SUM" || nextAgg === "AVG") {
+                                  nextAgg = "COUNT_DISTINCT";
+                                }
+                              } else if (isNum && (nextAgg === "COUNT" || nextAgg === "COUNT_DISTINCT")) {
+                                nextAgg = "SUM";
+                              }
+
+                              const updated = [...metricsList];
+                              updated[idx] = { ...updated[idx], column: val, agg: nextAgg };
+                              setMetricsList(updated);
+                              if (idx === 0) {
+                                setPrimaryMetricCol(val);
+                                setPrimaryMetricAgg(nextAgg);
+                              }
+                            }}
+                            className="flex-1 min-w-0 px-2 py-1 text-xs border border-slate-300 rounded bg-white font-medium text-slate-800"
+                          >
+                            <option value="count">Count of Rows (COUNT(*))</option>
+                            {numericColumns.length > 0 && (
+                              <optgroup label="Numeric Measures">
+                                {numericColumns.map((c) => {
+                                  const colName = c.column_name || c.name;
+                                  return (
+                                    <option key={colName} value={colName}>
+                                      {colName} ({c.data_type})
+                                    </option>
+                                  );
+                                })}
+                              </optgroup>
+                            )}
+                            {currentColumns
+                              .filter((c) => !isNumericColumn(c))
+                              .map((c) => {
                                 const colName = c.column_name || c.name;
                                 return (
                                   <option key={colName} value={colName}>
@@ -978,51 +1026,44 @@ export const ChartsPage: React.FC = () => {
                                   </option>
                                 );
                               })}
-                            </optgroup>
-                          )}
-                          {currentColumns
-                            .filter((c) => !isNumericColumn(c))
-                            .map((c) => {
-                              const colName = c.column_name || c.name;
-                              return (
-                                <option key={colName} value={colName}>
-                                  {colName} ({c.data_type})
-                                </option>
-                              );
-                            })}
-                        </select>
+                          </select>
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (metricsList.length > 1) {
-                              const updated = metricsList.filter((_, i) => i !== idx);
-                              setMetricsList(updated);
-                              if (idx === 0 && updated.length > 0) {
-                                setPrimaryMetricCol(updated[0].column);
-                                setPrimaryMetricAgg(updated[0].agg);
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (metricsList.length > 1) {
+                                const updated = metricsList.filter((_, i) => i !== idx);
+                                setMetricsList(updated);
+                                if (idx === 0 && updated.length > 0) {
+                                  setPrimaryMetricCol(updated[0].column);
+                                  setPrimaryMetricAgg(updated[0].agg);
+                                }
+                              } else {
+                                setMetricsList([{ id: "m-0", column: "count", agg: "COUNT" }]);
+                                setPrimaryMetricCol("count");
+                                setPrimaryMetricAgg("COUNT");
                               }
-                            } else {
-                              setMetricsList([{ id: "m-0", column: "count", agg: "COUNT" }]);
-                              setPrimaryMetricCol("count");
-                              setPrimaryMetricAgg("COUNT");
-                            }
-                          }}
-                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition"
-                          title="Delete this metric"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                            }}
+                            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition"
+                            title="Delete this metric"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
 
-                      <div className="text-[11px] text-slate-500 font-mono bg-white px-2 py-1 rounded border border-slate-200 flex items-center justify-between">
-                        <span className="text-slate-400">SQL Expression:</span>
-                        <span className="font-semibold text-blue-600 truncate ml-2">
-                          {m.column === "count" ? "COUNT(*)" : `${m.agg}("${m.column}")`}
-                        </span>
+                        <div className="text-[11px] text-slate-500 font-mono bg-white px-2 py-1 rounded border border-slate-200 flex items-center justify-between">
+                          <span className="text-slate-400">SQL Expression:</span>
+                          <span className="font-semibold text-blue-600 truncate ml-2">
+                            {m.column === "count"
+                              ? "COUNT(*)"
+                              : m.agg === "COUNT_DISTINCT"
+                              ? `COUNT(DISTINCT "${m.column}")`
+                              : `${m.agg}("${m.column}")`}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 <button
@@ -1032,9 +1073,14 @@ export const ChartsPage: React.FC = () => {
                       (c) => !metricsList.some((m) => m.column === (c.column_name || c.name))
                     );
                     const colToAdd = candidate ? candidate.column_name || candidate.name : "count";
+                    const isNum = candidate ? isNumericColumn(candidate) : false;
                     setMetricsList([
                       ...metricsList,
-                      { id: `m-${Date.now()}-${Math.random()}`, column: colToAdd, agg: "SUM" },
+                      {
+                        id: `m-${Date.now()}-${Math.random()}`,
+                        column: colToAdd,
+                        agg: isNum ? "SUM" : "COUNT",
+                      },
                     ]);
                   }}
                   className="mt-1 flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded transition"
