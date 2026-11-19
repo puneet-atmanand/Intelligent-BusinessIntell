@@ -421,9 +421,30 @@ export const DashboardsPage: React.FC = () => {
                       </div>
                       <div>
                         <h3 className="font-semibold text-slate-900 text-sm">{dash.title}</h3>
-                        <span className="inline-block px-2 py-0.5 text-[10px] uppercase font-bold tracking-wider bg-slate-100 text-slate-700 rounded mt-0.5">
-                          {dash.charts?.length || 0} Charts
-                        </span>
+                        {(() => {
+                          let sectionCount = 0;
+                          let chartCount = 0;
+                          const rawAllCharts: ChartItem[] = Array.isArray(allCharts)
+                            ? (allCharts as ChartItem[])
+                            : (allCharts as any)?.data || [];
+
+                          for (const p of dash.charts || []) {
+                            const ch = (p as any).chart || rawAllCharts.find((c) => c.id === p.chart_id);
+                            if (ch && (ch.viz_type === "header" || (ch.params as any)?.is_section_header)) {
+                              sectionCount++;
+                            } else {
+                              chartCount++;
+                            }
+                          }
+
+                          return (
+                            <span className="inline-block px-2 py-0.5 text-[10px] uppercase font-bold tracking-wider bg-slate-100 text-slate-700 rounded mt-0.5">
+                              {sectionCount > 0
+                                ? `${chartCount} ${chartCount === 1 ? "Chart" : "Charts"} · ${sectionCount} ${sectionCount === 1 ? "Section" : "Sections"}`
+                                : `${chartCount} ${chartCount === 1 ? "Chart" : "Charts"}`}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
                     <button
@@ -780,7 +801,9 @@ export const DashboardsPage: React.FC = () => {
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
-              {allChartsList.map((c) => (
+              {allChartsList
+                .filter((c) => c.viz_type !== "header" && !(c.params as any)?.is_section_header)
+                .map((c) => (
                 <div
                   key={c.id}
                   onClick={() => handleAddChartToDashboard(c.id)}
