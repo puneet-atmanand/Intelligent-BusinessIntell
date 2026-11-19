@@ -5,6 +5,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Chart, Dashboard, DashboardChart, Dataset, DatasetColumn, User
+from app.query.chart_query_builder import quote_identifier
 
 NUMERIC_TYPES = ("INT", "DOUBLE", "FLOAT", "DECIMAL", "NUMERIC")
 ID_LIKE_NAMES = {"id", "no", "sl_no", "sl_number", "row_id", "index", "code", "key"}
@@ -96,7 +97,16 @@ async def generate_dashboard_for_dataset(
     genuine_dims = [c for c in dim_cols if not _is_id_like(c)]
     num_cols = _rank_numeric_cols(columns)
 
-    count_metric = {"name": "count", "label": "Total Rows", "expression": "COUNT(*)"}
+    def _make_metric(col: DatasetColumn, agg: str = "AVG") -> Dict[str, Any]:
+        return {
+            "name": f"{agg.lower()}_{col.name}",
+            "column": col.name,
+            "agg": agg,
+            "label": f"{agg}({col.name})",
+            "expression": f"{agg}({quote_identifier(col.name)})",
+        }
+
+    count_metric = {"name": "count", "column": "count", "agg": "COUNT", "label": "Total Rows", "expression": "COUNT(*)"}
     primary_num = num_cols[0] if num_cols else None
     secondary_num = num_cols[1] if len(num_cols) > 1 else None
 
@@ -112,6 +122,9 @@ async def generate_dashboard_for_dataset(
             "params": {
                 "dimensions": [],
                 "metrics": [count_metric],
+                "metrics_config": [{"id": "m-0", "column": "count", "agg": "COUNT"}],
+                "primary_metric_col": "count",
+                "primary_metric_agg": "COUNT",
                 "row_limit": 1,
                 "options": {},
             },
@@ -124,6 +137,9 @@ async def generate_dashboard_for_dataset(
             "params": {
                 "dimensions": table_dims,
                 "metrics": [count_metric],
+                "metrics_config": [{"id": "m-0", "column": "count", "agg": "COUNT"}],
+                "primary_metric_col": "count",
+                "primary_metric_agg": "COUNT",
                 "row_limit": 50,
                 "options": {},
             },
@@ -135,26 +151,42 @@ async def generate_dashboard_for_dataset(
             chart_specs.append({
                 "title": f"Total {dataset.name}",
                 "viz_type": "big_number",
-                "params": {"dimensions": [], "metrics": [count_metric], "row_limit": 1, "options": {}},
+                "params": {
+                    "dimensions": [],
+                    "metrics": [count_metric],
+                    "metrics_config": [{"id": "m-0", "column": "count", "agg": "COUNT"}],
+                    "primary_metric_col": "count",
+                    "primary_metric_agg": "COUNT",
+                    "row_limit": 1,
+                    "options": {},
+                },
                 "position": {"x": 0, "y": 0, "w": 4, "h": 3},
             })
+            m_prim = _make_metric(primary_num, "AVG")
             chart_specs.append({
                 "title": f"Average {primary_num.verbose_name or primary_num.name}",
                 "viz_type": "big_number",
                 "params": {
                     "dimensions": [],
-                    "metrics": [{"name": f"avg_{primary_num.name}", "label": f"AVG({primary_num.name})", "expression": f"AVG({primary_num.name})"}],
+                    "metrics": [m_prim],
+                    "metrics_config": [{"id": "m-0", "column": primary_num.name, "agg": "AVG"}],
+                    "primary_metric_col": primary_num.name,
+                    "primary_metric_agg": "AVG",
                     "row_limit": 1,
                     "options": {},
                 },
                 "position": {"x": 4, "y": 0, "w": 4, "h": 3},
             })
+            m_sec = _make_metric(secondary_num, "AVG")
             chart_specs.append({
                 "title": f"Average {secondary_num.verbose_name or secondary_num.name}",
                 "viz_type": "big_number",
                 "params": {
                     "dimensions": [],
-                    "metrics": [{"name": f"avg_{secondary_num.name}", "label": f"AVG({secondary_num.name})", "expression": f"AVG({secondary_num.name})"}],
+                    "metrics": [m_sec],
+                    "metrics_config": [{"id": "m-0", "column": secondary_num.name, "agg": "AVG"}],
+                    "primary_metric_col": secondary_num.name,
+                    "primary_metric_agg": "AVG",
                     "row_limit": 1,
                     "options": {},
                 },
@@ -164,15 +196,27 @@ async def generate_dashboard_for_dataset(
             chart_specs.append({
                 "title": f"Total {dataset.name}",
                 "viz_type": "big_number",
-                "params": {"dimensions": [], "metrics": [count_metric], "row_limit": 1, "options": {}},
+                "params": {
+                    "dimensions": [],
+                    "metrics": [count_metric],
+                    "metrics_config": [{"id": "m-0", "column": "count", "agg": "COUNT"}],
+                    "primary_metric_col": "count",
+                    "primary_metric_agg": "COUNT",
+                    "row_limit": 1,
+                    "options": {},
+                },
                 "position": {"x": 0, "y": 0, "w": 6, "h": 3},
             })
+            m_prim = _make_metric(primary_num, "AVG")
             chart_specs.append({
                 "title": f"Average {primary_num.verbose_name or primary_num.name}",
                 "viz_type": "big_number",
                 "params": {
                     "dimensions": [],
-                    "metrics": [{"name": f"avg_{primary_num.name}", "label": f"AVG({primary_num.name})", "expression": f"AVG({primary_num.name})"}],
+                    "metrics": [m_prim],
+                    "metrics_config": [{"id": "m-0", "column": primary_num.name, "agg": "AVG"}],
+                    "primary_metric_col": primary_num.name,
+                    "primary_metric_agg": "AVG",
                     "row_limit": 1,
                     "options": {},
                 },
@@ -218,7 +262,7 @@ async def generate_dashboard_for_dataset(
 
         # 3. Row 2: Line Chart & Area Chart (viz_type: line, area)
         primary_metric_expr = (
-            {"name": f"avg_{primary_num.name}", "label": f"AVG({primary_num.name})", "expression": f"AVG({primary_num.name})"}
+            _make_metric(primary_num, "AVG")
             if primary_num
             else count_metric
         )
@@ -280,18 +324,18 @@ async def generate_dashboard_for_dataset(
         scatter_metrics = []
         if primary_num and secondary_num:
             scatter_metrics = [
-                {"name": f"avg_{primary_num.name}", "label": f"AVG({primary_num.name})", "expression": f"AVG({primary_num.name})"},
-                {"name": f"avg_{secondary_num.name}", "label": f"AVG({secondary_num.name})", "expression": f"AVG({secondary_num.name})"},
+                _make_metric(primary_num, "AVG"),
+                _make_metric(secondary_num, "AVG"),
             ]
         elif primary_num:
             scatter_metrics = [
-                {"name": f"avg_{primary_num.name}", "label": f"AVG({primary_num.name})", "expression": f"AVG({primary_num.name})"},
-                {"name": "record_count", "label": "Record Count", "expression": "COUNT(*)"},
+                _make_metric(primary_num, "AVG"),
+                {"name": "record_count", "column": "count", "agg": "COUNT", "label": "Record Count", "expression": "COUNT(*)"},
             ]
         else:
             scatter_metrics = [
-                {"name": "record_count", "label": "Record Count", "expression": "COUNT(*)"},
-                {"name": "total_records", "label": "Total Records", "expression": "COUNT(*)"},
+                {"name": "record_count", "column": "count", "agg": "COUNT", "label": "Record Count", "expression": "COUNT(*)"},
+                {"name": "total_records", "column": "count", "agg": "COUNT", "label": "Total Records", "expression": "COUNT(*)"},
             ]
 
         chart_specs.append({
@@ -338,9 +382,9 @@ async def generate_dashboard_for_dataset(
 
         table_metrics = [count_metric]
         if primary_num:
-            table_metrics.append({"name": f"avg_{primary_num.name}", "label": f"AVG({primary_num.name})", "expression": f"AVG({primary_num.name})"})
+            table_metrics.append(_make_metric(primary_num, "AVG"))
         if secondary_num:
-            table_metrics.append({"name": f"avg_{secondary_num.name}", "label": f"AVG({secondary_num.name})", "expression": f"AVG({secondary_num.name})"})
+            table_metrics.append(_make_metric(secondary_num, "AVG"))
 
         chart_specs.append({
             "title": f"{dataset.name} Summary Table",

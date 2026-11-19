@@ -46,6 +46,8 @@ class ChartDataRequest(BaseModel):
     time_range: Optional[Dict[str, str]] = None
     order_by: Optional[List[Dict[str, str]]] = None
     row_limit: int = 1000
+    ai_snapshot_id: Optional[uuid.UUID] = None
+    source_type: Optional[str] = None
 
 
 class ChartDataResponse(BaseModel):

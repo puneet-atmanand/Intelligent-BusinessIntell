@@ -31,16 +31,18 @@ async def readiness_probe(
     checks: Dict[str, str] = {}
     is_ready = True
 
-    # 1. PostgreSQL Check
+    # 1. Database Connectivity Check (SQLite / PostgreSQL)
     try:
         result = await session.execute(text("SELECT 1"))
         if result.scalar() == 1:
-            checks["postgres"] = "ok"
+            db_label = "sqlite" if "sqlite" in settings.METADATA_DATABASE_URL else "postgres"
+            checks[db_label] = "ok"
+            checks["database"] = "ok"
         else:
-            checks["postgres"] = "unexpected_response"
+            checks["database"] = "unexpected_response"
             is_ready = False
     except Exception as e:
-        checks["postgres"] = f"error: {str(e)}"
+        checks["database"] = f"error: {str(e)}"
         is_ready = False
 
     # 2. Redis Check

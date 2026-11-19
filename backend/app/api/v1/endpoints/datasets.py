@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.api.v1.deps import get_db_session, require_permission
 from app.connectors.factory import get_connector
 from app.core.config import settings
-from app.core.errors import NotFoundError, AppException, ValidationError
+from app.core.errors import NotFoundError, AppException, ValidationError, PermissionDeniedError
 from app.db.models import (
     DatabaseConnection,
     Dataset,
@@ -69,12 +69,30 @@ async def _repair_postgres_datasets_schema(session: AsyncSession) -> None:
         pass
 
 
+def _check_dataset_access(dataset: Dataset, user: User, write: bool = False) -> None:
+    """Enforce dataset ownership and access isolation."""
+    if user.is_superuser:
+        return
+    # Read access is permitted for all authenticated users with datasets:read permission
+    if not write:
+        return
+    # Write / delete operations are restricted to dataset creator, explicit owners, or superadmin
+    if dataset.created_by_id and dataset.created_by_id == user.id:
+        return
+    if dataset.owners and user.email in dataset.owners:
+        return
+    raise PermissionDeniedError(
+        f"Access denied: You do not have permission to modify or delete this dataset.",
+        details={"dataset_id": str(dataset.id), "user_id": str(user.id)},
+    )
+
+
 @router.get("/")
 async def list_datasets(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(require_permission("datasets:read")),
 ) -> Any:
-    """List all physical and virtual datasets."""
+    """List physical and virtual datasets accessible to current user."""
     await _repair_postgres_datasets_schema(session)
 
     stmt = (
@@ -641,6 +659,8 @@ async def get_dataset(
     if not dataset:
         raise NotFoundError("Dataset not found.")
 
+    _check_dataset_access(dataset, current_user, write=False)
+
     conn_stmt = select(DatabaseConnection).where(DatabaseConnection.id == dataset.database_id)
     conn_res = await session.execute(conn_stmt)
     db_conn = conn_res.scalar_one_or_none()
@@ -728,6 +748,14 @@ async def delete_dataset(
     current_user: User = Depends(require_permission("datasets:write")),
 ) -> Dict[str, Any]:
     """Delete a semantic dataset and cascade to all its charts and dashboards."""
+    stmt = select(Dataset).where(Dataset.id == id, Dataset.deleted_at.is_(None))
+    result = await session.execute(stmt)
+    dataset = result.scalar_one_or_none()
+    if not dataset:
+        raise NotFoundError("Dataset not found.")
+
+    _check_dataset_access(dataset, current_user, write=True)
+
     res = await delete_dataset_cascade(session=session, dataset_id=id)
     return {
         "message": "Dataset deleted successfully.",
@@ -835,6 +863,8 @@ async def get_dataset_profile(
     dataset = result.scalar_one_or_none()
     if not dataset:
         raise NotFoundError("Dataset not found.")
+
+    _check_dataset_access(dataset, current_user, write=False)
 
     db_conn = await session.get(DatabaseConnection, dataset.database_id)
     if not db_conn or db_conn.deleted_at is not None:
@@ -1006,6 +1036,8 @@ async def get_dataset_rows(
     dataset = result.scalar_one_or_none()
     if not dataset:
         raise NotFoundError("Dataset not found.")
+
+    _check_dataset_access(dataset, current_user, write=False)
 
     db_conn = await session.get(DatabaseConnection, dataset.database_id)
     if not db_conn or db_conn.deleted_at is not None:

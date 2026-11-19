@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.deps import get_db_session, require_permission
 from app.connectors.duckdb_connector import duckdb_write_lock
 from app.core.config import settings
-from app.core.errors import AppException, NotFoundError
+from app.core.errors import AppException, NotFoundError, PermissionDeniedError
 from app.db.models import UploadedFile, User
 from app.services.cascade_delete_service import delete_upload_cascade
 from app.uploads.duckdb_loader import load_file_into_duckdb_and_register_dataset
@@ -91,12 +91,17 @@ async def list_uploads(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(require_permission("uploads:use")),
 ) -> Dict[str, Any]:
-    """List uploaded files."""
+    """List uploaded files accessible to current user."""
     stmt = (
         select(UploadedFile)
         .where(UploadedFile.deleted_at.is_(None))
-        .order_by(UploadedFile.created_at.desc())
     )
+    if not current_user.is_superuser:
+        stmt = stmt.where(
+            (UploadedFile.uploaded_by_id == current_user.id)
+            | (UploadedFile.uploaded_by_id.is_(None))
+        )
+    stmt = stmt.order_by(UploadedFile.created_at.desc())
     result = await session.execute(stmt)
     files = result.scalars().all()
     return {
@@ -125,6 +130,19 @@ async def delete_upload(
     current_user: User = Depends(require_permission("uploads:use")),
 ) -> Dict[str, Any]:
     """Delete uploaded file record, drop DuckDB table, and cascade delete its dataset, charts & dashboards."""
+    stmt = select(UploadedFile).where(UploadedFile.id == id, UploadedFile.deleted_at.is_(None))
+    result = await session.execute(stmt)
+    file_record = result.scalar_one_or_none()
+    if not file_record:
+        raise NotFoundError("Upload record not found.")
+
+    if (
+        not current_user.is_superuser
+        and file_record.uploaded_by_id is not None
+        and file_record.uploaded_by_id != current_user.id
+    ):
+        raise PermissionDeniedError("Access denied: You do not own this upload.")
+
     res = await delete_upload_cascade(session=session, upload_id=id)
     return {
         "message": f"File and table '{res.get('table_name')}' deleted successfully.",
