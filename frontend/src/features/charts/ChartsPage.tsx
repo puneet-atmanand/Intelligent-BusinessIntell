@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { api, ChartItem, DatasetItem, ChartDataResponse } from "@/app/api";
 import { chartRegistry, ChartPlugin } from "@/charts";
-import { isTemporalColumn, isNumericColumn } from "./utils";
+import { isTemporalColumn, isNumericColumn, parseMetricExpression } from "./utils";
 import { AIDrawer } from "@/features/ai/AIDrawer";
 
 export const ChartsPage: React.FC = () => {
@@ -227,20 +227,32 @@ export const ChartsPage: React.FC = () => {
             agg: "EXPR",
           });
         } else {
-          const agg = (m.agg || "SUM").toUpperCase();
-          const expr =
-            agg === "COUNT_DISTINCT"
-              ? `COUNT(DISTINCT "${m.column}")`
-              : `${agg}("${m.column}")`;
-          const mName = `${agg.toLowerCase()}_${m.column}`;
-          const label = `${agg}(${m.column})`;
-          list.push({
-            name: mName,
-            label,
-            expression: expr,
-            column: m.column,
-            agg,
-          });
+          const resolved = parseMetricExpression(m, currentColumns);
+          const validCol = resolved.column;
+          const agg = (resolved.agg || m.agg || "SUM").toUpperCase();
+          if (validCol === "count") {
+            list.push({
+              name: "count",
+              label: "Count of Rows",
+              expression: "COUNT(*)",
+              column: "count",
+              agg: "COUNT",
+            });
+          } else {
+            const expr =
+              agg === "COUNT_DISTINCT"
+                ? `COUNT(DISTINCT "${validCol}")`
+                : `${agg}("${validCol}")`;
+            const mName = `${agg.toLowerCase()}_${validCol}`;
+            const label = `${agg}(${validCol})`;
+            list.push({
+              name: mName,
+              label,
+              expression: expr,
+              column: validCol,
+              agg,
+            });
+          }
         }
       }
     }
@@ -416,29 +428,47 @@ export const ChartsPage: React.FC = () => {
       setSelectedDimension(dims[0] || "");
       setSelectedDimensions(dims);
 
+      const targetDs = datasetList.find((d: DatasetItem) => d.id === chartToEdit.dataset_id);
+      const targetCols = targetDs?.columns || [];
+
       if (p.metrics_config && Array.isArray(p.metrics_config) && p.metrics_config.length > 0) {
-        setMetricsList(p.metrics_config);
-        setPrimaryMetricCol(p.metrics_config[0].column);
-        setPrimaryMetricAgg(p.metrics_config[0].agg);
+        const resolvedList = p.metrics_config.map((mc: any, idx: number) => {
+          const parsed = parseMetricExpression(mc, targetCols);
+          return {
+            id: mc.id || `m-${idx}`,
+            column: parsed.column,
+            agg: parsed.agg,
+          };
+        });
+        setMetricsList(resolvedList);
+        setPrimaryMetricCol(resolvedList[0].column);
+        setPrimaryMetricAgg(resolvedList[0].agg);
       } else if (p.metrics && p.metrics.length > 0) {
-        const mappedList = p.metrics.map((m: any, idx: number) => ({
-          id: `m-${idx}`,
-          column: m.column || m.name || "count",
-          agg: m.agg || "SUM",
-        }));
+        const mappedList = p.metrics.map((m: any, idx: number) => {
+          const parsed = parseMetricExpression(m, targetCols);
+          return {
+            id: `m-${idx}`,
+            column: parsed.column,
+            agg: parsed.agg,
+          };
+        });
         setMetricsList(mappedList);
         setPrimaryMetricCol(mappedList[0].column);
         setPrimaryMetricAgg(mappedList[0].agg);
       } else if (p.primary_metric_col) {
-        setPrimaryMetricCol(p.primary_metric_col);
-        setPrimaryMetricAgg(p.primary_metric_agg || "SUM");
+        const parsed = parseMetricExpression(
+          { column: p.primary_metric_col, agg: p.primary_metric_agg },
+          targetCols
+        );
+        setPrimaryMetricCol(parsed.column);
+        setPrimaryMetricAgg(parsed.agg);
         setMetricsList([
-          { id: "m-0", column: p.primary_metric_col, agg: p.primary_metric_agg || "SUM" },
+          { id: "m-0", column: parsed.column, agg: parsed.agg },
         ]);
       } else {
         setPrimaryMetricCol("count");
-        setPrimaryMetricAgg("SUM");
-        setMetricsList([{ id: "m-0", column: "count", agg: "SUM" }]);
+        setPrimaryMetricAgg("COUNT");
+        setMetricsList([{ id: "m-0", column: "count", agg: "COUNT" }]);
       }
 
       setTimeColumn(p.time_column || "");
