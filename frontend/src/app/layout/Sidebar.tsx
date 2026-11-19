@@ -4,7 +4,9 @@ import {
   BarChart3,
   Database,
   Terminal,
+  Server,
   UploadCloud,
+  Globe,
   Shield,
   Settings as SettingsIcon,
   ChevronLeft,
@@ -31,13 +33,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     { name: "Charts", path: "/charts", icon: BarChart3 },
     { name: "Datasets", path: "/datasets", icon: Database },
     { name: "SQL Lab", path: "/sqllab", icon: Terminal },
+    ...(isAdmin ? [{ name: "Databases", path: "/databases", icon: Server }] : []),
     { name: "Uploads", path: "/uploads", icon: UploadCloud },
+    ...(isAdmin ? [{ name: "API Connect", path: "/api-connect", icon: Globe }] : []),
     { name: "Settings", path: "/settings", icon: SettingsIcon },
+    ...(isAdmin ? [{ name: "Admin", path: "/admin", icon: Shield }] : []),
   ];
-
-  if (isAdmin) {
-    navItems.push({ name: "Admin", path: "/admin", icon: Shield });
-  }
 
   return (
     <aside

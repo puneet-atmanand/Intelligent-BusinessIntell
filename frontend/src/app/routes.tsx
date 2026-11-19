@@ -75,7 +75,11 @@ export const router = createBrowserRouter([
       },
       {
         path: "databases",
-        element: <DatabasesPage />,
+        element: (
+          <AdminRoute>
+            <DatabasesPage />
+          </AdminRoute>
+        ),
       },
       {
         path: "uploads",
@@ -83,7 +87,11 @@ export const router = createBrowserRouter([
       },
       {
         path: "api-connect",
-        element: <ApiConnectionsPage />,
+        element: (
+          <AdminRoute>
+            <ApiConnectionsPage />
+          </AdminRoute>
+        ),
       },
       {
         path: "settings",
